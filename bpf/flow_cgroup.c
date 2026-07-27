@@ -5,18 +5,20 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
-// The flow identity: who (cgroup) + where (5-tuple). IPv4 only for this inch.
 struct flow_key {
     __u64 cgroup_id;
-    __u32 saddr;   // local  IP
-    __u32 daddr;   // remote IP
+    __u32 saddr;
+    __u32 daddr;
     __u16 sport;
     __u16 dport;
     __u8  proto;
-    __u8  _pad[3]; // keep key bytes deterministic
+    __u8  _pad[3];
 };
 
-struct flow_stat { __u64 bytes_tx; __u64 packets_tx; };
+struct flow_stat {
+    __u64 bytes_tx; __u64 packets_tx;
+    __u64 bytes_rx; __u64 packets_rx;
+};
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -25,41 +27,53 @@ struct {
     __type(value, struct flow_stat);
 } flows SEC(".maps");
 
-SEC("cgroup_skb/egress")
-int kharcha_egress(struct __sk_buff *skb) {
-    struct flow_key key;
-    __builtin_memset(&key, 0, sizeof(key));   // no uninitialized key bytes
-    key.cgroup_id = bpf_skb_cgroup_id(skb);
+static __always_inline int build_key(struct __sk_buff *skb, struct flow_key *key, int is_egress) {
+    __builtin_memset(key, 0, sizeof(*key));
+    key->cgroup_id = bpf_skb_cgroup_id(skb);
 
-    // cgroup_skb data starts at L3 (IP header). Read the IPv4 header.
     struct iphdr iph;
-    if (bpf_skb_load_bytes(skb, 0, &iph, sizeof(iph)) < 0)
-        return 1;                              // can't read -> allow, skip
-    if (iph.version != 4)
-        return 1;                              // IPv6 later; skip for now
+    if (bpf_skb_load_bytes(skb, 0, &iph, sizeof(iph)) < 0) return -1;
+    if (iph.version != 4) return -1;
 
-    key.saddr = iph.saddr;
-    key.daddr = iph.daddr;
-    key.proto = iph.protocol;
-
-    __u32 l4_off = (iph.ihl & 0x0F) * 4;       // IP header length in bytes
-
-    // ports live in the first 4 bytes of TCP/UDP headers
+    __u16 sp = 0, dp = 0;
+    __u32 l4_off = (iph.ihl & 0x0F) * 4;
     if (iph.protocol == IPPROTO_TCP || iph.protocol == IPPROTO_UDP) {
         __be16 ports[2];
         if (bpf_skb_load_bytes(skb, l4_off, ports, sizeof(ports)) == 0) {
-            key.sport = bpf_ntohs(ports[0]);
-            key.dport = bpf_ntohs(ports[1]);
+            sp = bpf_ntohs(ports[0]);
+            dp = bpf_ntohs(ports[1]);
         }
     }
+    key->proto = iph.protocol;
 
-    struct flow_stat *st = bpf_map_lookup_elem(&flows, &key);
-    if (st) {
-        st->bytes_tx   += skb->len;
-        st->packets_tx += 1;
+    if (is_egress) {
+        key->saddr = iph.saddr; key->daddr = iph.daddr;
+        key->sport = sp;        key->dport = dp;
     } else {
-        struct flow_stat init = { .bytes_tx = skb->len, .packets_tx = 1 };
-        bpf_map_update_elem(&flows, &key, &init, BPF_ANY);
+        key->saddr = iph.daddr; key->daddr = iph.saddr;
+        key->sport = dp;        key->dport = sp;
     }
+    return 0;
+}
+
+SEC("cgroup_skb/egress")
+int kharcha_egress(struct __sk_buff *skb) {
+    struct flow_key key;
+    if (build_key(skb, &key, 1) < 0) return 1;
+    struct flow_stat *st = bpf_map_lookup_elem(&flows, &key);
+    if (st) { st->bytes_tx += skb->len; st->packets_tx += 1; }
+    else { struct flow_stat init = { .bytes_tx = skb->len, .packets_tx = 1 };
+           bpf_map_update_elem(&flows, &key, &init, BPF_ANY); }
+    return 1;
+}
+
+SEC("cgroup_skb/ingress")
+int kharcha_ingress(struct __sk_buff *skb) {
+    struct flow_key key;
+    if (build_key(skb, &key, 0) < 0) return 1;
+    struct flow_stat *st = bpf_map_lookup_elem(&flows, &key);
+    if (st) { st->bytes_rx += skb->len; st->packets_rx += 1; }
+    else { struct flow_stat init = { .bytes_rx = skb->len, .packets_rx = 1 };
+           bpf_map_update_elem(&flows, &key, &init, BPF_ANY); }
     return 1;
 }
