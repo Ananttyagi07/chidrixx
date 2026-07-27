@@ -21,7 +21,7 @@ struct flow_stat {
 };
 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_PERCPU_HASH);
     __uint(max_entries, 4096);
     __type(key, struct flow_key);
     __type(value, struct flow_stat);
