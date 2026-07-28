@@ -49,7 +49,7 @@ jobs:
       # bytes correctly, this fails. A byte-for-byte diff against the
       # committed .o isn't meaningful here since DWARF debug info isn't
       # reproducible across compilers/paths even for identical source.
-      - name: go test (privileged: BPF load/attach)
+      - name: "go test (privileged: BPF load/attach)"
         run: sudo env "PATH=$PATH" go test ./... -run 'TestEgressByteAccounting|TestLoadAttachesAndDetaches' -v
 
   docker-build:
