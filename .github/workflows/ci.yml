@@ -1,0 +1,68 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: gofmt check
+        run: |
+          diff <(gofmt -l .) <(printf "")
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test (unprivileged)
+        run: go test ./... -v
+
+      - name: recompile bpf/flow_cgroup.o from source
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang llvm libbpf-dev linux-headers-$(uname -r)
+          clang -O2 -g -target bpfel -D__TARGET_ARCH_x86 -I ../bpf -c ../bpf/flow_cgroup.c -o ../bpf/flow_cgroup.o
+
+      # cgroup_skb attach needs real CAP_BPF. GitHub-hosted runners are full
+      # VMs (not nested Docker containers), so — unlike a Docker-in-Docker
+      # cluster such as k3d, where this repo hit a real cgroupns=private
+      # wall — they should share the host's own init cgroup namespace and
+      # not hit that problem. Confirmed by actually running this job, not
+      # assumed: see the run history for this workflow.
+      #
+      # Runs against the object just recompiled above, not the committed
+      # one — this is what actually catches source/binary drift: if the
+      # .c no longer produces a program that loads, attaches, and counts
+      # bytes correctly, this fails. A byte-for-byte diff against the
+      # committed .o isn't meaningful here since DWARF debug info isn't
+      # reproducible across compilers/paths even for identical source.
+      - name: go test (privileged: BPF load/attach)
+        run: sudo env "PATH=$PATH" go test ./... -run 'TestEgressByteAccounting|TestLoadAttachesAndDetaches' -v
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build the agent image
+        run: docker build -t chidrixx-agent:ci .
+
+  helm-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint deploy/helm/kharcha
+      - run: helm template deploy/helm/kharcha
