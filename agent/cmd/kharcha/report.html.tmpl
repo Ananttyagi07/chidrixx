@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chidrixx Kubernetes Network Attribution</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; margin: 2rem; color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.25rem; margin-bottom: 0.25rem; }
+  .meta { color: #666; font-size: 0.85rem; margin-bottom: 1.5rem; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+  th, td { padding: 0.4rem 0.6rem; border-bottom: 1px solid #e5e5e5; text-align: left; vertical-align: top; }
+  th { border-bottom: 2px solid #ccc; font-weight: 600; }
+  tr:nth-child(even) { background: #fafafa; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .class { font-family: ui-monospace, monospace; font-size: 0.8rem; }
+  .conf-high { color: #1a7f37; }
+  .conf-med  { color: #9a6700; }
+  .conf-low  { color: #b91c1c; }
+  .fix { color: #444; font-size: 0.8rem; max-width: 22rem; }
+  .footer { color: #666; font-size: 0.8rem; margin-top: 1.5rem; }
+</style>
+</head>
+<body>
+  <h1>Chidrixx Kubernetes Network Attribution</h1>
+  <div class="meta">{{len .Findings}} findings, ranked by estimated cost (high end of range)</div>
+
+  {{if not .Findings}}
+    <p>No traffic observed yet.</p>
+  {{else}}
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Source</th>
+        <th>Destination</th>
+        <th>Class</th>
+        <th>Confidence</th>
+        <th class="num">TX bytes</th>
+        <th class="num">RX bytes</th>
+        <th class="num">Cost (INR)</th>
+        <th>Fix</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range $i, $f := .Findings}}
+      <tr>
+        <td>{{inc $i}}</td>
+        <td>{{$f.Source}}</td>
+        <td>{{$f.Destination}}</td>
+        <td class="class">{{$f.Class}}</td>
+        <td class="conf-{{$f.Confidence}}">{{$f.Confidence}}</td>
+        <td class="num">{{$f.BytesTx}}</td>
+        <td class="num">{{$f.BytesRx}}</td>
+        <td class="num">&#8377;{{printf "%.4f" $f.CostLowINR}}&ndash;{{printf "%.4f" $f.CostHighINR}}</td>
+        <td class="fix">{{$f.FixHint}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{end}}
+
+  <div class="footer">
+    prices: {{.PriceBook.Cloud}}/{{.PriceBook.Region}} &middot; list rates last verified {{.PriceBook.LastVerified}} &middot; USD&rarr;INR {{printf "%.1f" .PriceBook.FX.UsdToInr}}<br>
+    estimates from list prices unless negotiated rates were loaded; ranges widen for lower-confidence classifications.
+  </div>
+</body>
+</html>

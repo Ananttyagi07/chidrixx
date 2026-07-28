@@ -1,0 +1,20 @@
+# Overridable price book (build manual §9.1 / §12). List-price defaults —
+# verify current per-region rates before trusting this for a real bill, and
+# swap in negotiated enterprise rates without touching code.
+cloud: aws
+region: ap-south-1
+last_verified: "2026-07-29"
+unit: per_gb_usd
+
+rates:
+  same_node: 0.0
+  same_az: 0.0
+  cross_az: 0.0088          # each direction
+  cross_region: 0.0860
+  managed_service: 0.0088   # e.g. RDS/MSK/ES in another AZ
+  private_offcluster: 0.0
+  nat_egress: 0.0450        # NAT gateway processing
+  internet_egress: 0.1093   # first tier; add tiers[] if this matters at your volume
+
+fx:
+  usd_to_inr: 84.0

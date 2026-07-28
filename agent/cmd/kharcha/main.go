@@ -1,14 +1,68 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/cilium/ebpf"
 )
+
+// parseManagedCIDRs parses a comma-separated CIDR list (the -managed-cidrs
+// flag) into the []*net.IPNet the classifier checks remote IPs against.
+func parseManagedCIDRs(csv string) ([]*net.IPNet, error) {
+	csv = strings.TrimSpace(csv)
+	if csv == "" {
+		return nil, nil
+	}
+
+	var nets []*net.IPNet
+
+	for _, part := range strings.Split(csv, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		_, n, err := net.ParseCIDR(part)
+		if err != nil {
+			return nil, fmt.Errorf("invalid CIDR %q: %w", part, err)
+		}
+
+		nets = append(nets, n)
+	}
+
+	return nets, nil
+}
+
+// resolveNodeName picks this node's name: the flag if set, else $NODE_NAME
+// (the standard Downward API env var a DaemonSet sets from
+// spec.nodeName), else the OS hostname as a last resort for bare/local
+// runs.
+func resolveNodeName(flagVal string) string {
+	if flagVal != "" {
+		return flagVal
+	}
+
+	if env := os.Getenv("NODE_NAME"); env != "" {
+		return env
+	}
+
+	host, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+
+	return host
+}
 
 // FlowKey must exactly match the key layout used by the eBPF flows map.
 type FlowKey struct {
@@ -57,13 +111,19 @@ func delta(prev, cur FlowStat) FlowStat {
 
 // scrape reads the current per-CPU eBPF flow map,
 // calculates traffic deltas, resolves the originating workload,
-// and feeds the result into the cumulative aggregator.
+// resolves Kubernetes destination metadata, and feeds everything
+// into the cumulative aggregator.
 func scrape(
 	m *ebpf.Map,
 	prev map[FlowKey]FlowStat,
 	agg *Aggregate,
 	resolver *WorkloadResolver,
+	kube *KubernetesResolver,
 ) map[FlowKey]FlowStat {
+	start := time.Now()
+	defer func() {
+		scrapeLagSeconds.Set(time.Since(start).Seconds())
+	}()
 
 	cur := make(map[FlowKey]FlowStat)
 
@@ -75,7 +135,7 @@ func scrape(
 	for iter.Next(&key, &perCPU) {
 		var sum FlowStat
 
-		// The eBPF map is PERCPU, so combine the counters
+		// The eBPF map is PERCPU, so combine counters
 		// from every CPU into one FlowStat.
 		for _, s := range perCPU {
 			sum.BytesTx += s.BytesTx
@@ -86,7 +146,7 @@ func scrape(
 
 		cur[key] = sum
 
-		// Calculate only the traffic added since the last scrape.
+		// Calculate traffic added since the previous scrape.
 		d := delta(prev[key], sum)
 
 		if d.BytesTx == 0 && d.BytesRx == 0 {
@@ -97,14 +157,86 @@ func scrape(
 		// produced by our eBPF flow accounting logic.
 		remote := net.ParseIP(ipString(key.Daddr))
 
-		// WorkloadResolver itself lives in workload.go.
-		workload := resolver.Resolve(key.CgroupID)
+		// Resolve the originating cgroup into either:
+		//
+		//   Kubernetes workload metadata
+		//
+		// or:
+		//
+		//   host/system cgroup metadata.
+		source := resolver.Resolve(key.CgroupID)
 
-		// Add this window's traffic to the cumulative report.
+		var destination *KubeWorkload
+		var service *KubeService
+		var endpoint *KubeEndpoint
+		var serviceBackends []*KubeEndpoint
+
+		if kube != nil {
+			// -------------------------------------------------
+			// 1. Direct Pod-IP destination
+			// -------------------------------------------------
+			//
+			// Example:
+			//
+			//   10.42.0.11 -> 10.42.0.12
+			//
+			destination = kube.ResolveIP(remote)
+
+			// -------------------------------------------------
+			// 2. Kubernetes Service ClusterIP
+			// -------------------------------------------------
+			//
+			// Example:
+			//
+			//   10.43.63.100 -> chidrixx-test/service/server
+			//
+			service = kube.ResolveServiceIP(remote)
+
+			// -------------------------------------------------
+			// 3. EndpointSlice backend IP
+			// -------------------------------------------------
+			//
+			// The observed remote address may already be the
+			// backend Pod IP after Kubernetes service NAT.
+			//
+			endpoint = kube.ResolveEndpointIP(remote)
+
+			// -------------------------------------------------
+			// 4. Service -> candidate EndpointSlice backends
+			// -------------------------------------------------
+			//
+			// IMPORTANT:
+			//
+			// EndpointSlice tells us which Pods are registered
+			// behind a Service. It does NOT by itself prove which
+			// backend handled this specific connection.
+			//
+			if service != nil {
+				serviceBackends = kube.ResolveServiceBackends(service)
+			}
+
+			// -------------------------------------------------
+			// 5. Endpoint -> Kubernetes workload
+			// -------------------------------------------------
+			//
+			// If the destination wasn't resolved directly through
+			// the Pod-IP cache, but the observed address matches an
+			// EndpointSlice backend, resolve that endpoint to its
+			// backing Pod/container metadata.
+			//
+			if destination == nil && endpoint != nil {
+				destination = kube.ResolveEndpointWorkload(endpoint)
+			}
+		}
+
+		// Feed this scrape window into the cumulative report.
 		agg.Add(
-			key.CgroupID,
-			workload,
+			source,
 			remote,
+			destination,
+			service,
+			endpoint,
+			serviceBackends,
 			d.BytesTx,
 			d.BytesRx,
 		)
@@ -114,43 +246,188 @@ func scrape(
 		log.Printf("iterate error: %v", err)
 	}
 
+	mapEntries.Set(float64(len(cur)))
+
 	return cur
 }
 
 func main() {
-	const mapPath = "/sys/fs/bpf/chidrixx/flows"
+	bpfObject := flag.String(
+		"bpf-object",
+		"bpf/flow_cgroup.o",
+		"path to the compiled eBPF object (built from bpf/flow_cgroup.c)",
+	)
+	cgroupPath := flag.String(
+		"cgroup-path",
+		"/sys/fs/cgroup",
+		"cgroup v2 mount to attach the egress/ingress programs to",
+	)
+	pricebookPath := flag.String(
+		"pricebook",
+		"pricebook/aws.yaml",
+		"path to the YAML price book (build manual §9.1/§12)",
+	)
+	managedCIDRsFlag := flag.String(
+		"managed-cidrs",
+		"",
+		"comma-separated CIDRs of managed-service endpoints (RDS/MSK/ES/...) to classify as MANAGED_SERVICE",
+	)
+	nodeHasPublicIP := flag.Bool(
+		"node-has-public-ip",
+		true,
+		"whether this node has its own path to the internet; false enables the NAT-egress heuristic for off-cluster traffic",
+	)
+	nodeNameFlag := flag.String(
+		"node-name",
+		"",
+		"this node's name, for SAME_NODE/zone classification of host-level traffic; defaults to $NODE_NAME then the OS hostname",
+	)
+	htmlOut := flag.String(
+		"html-out",
+		"report.html",
+		"path to write the HTML report to after every scrape; empty disables it",
+	)
+	metricsAddr := flag.String(
+		"metrics-addr",
+		":9300",
+		"address to serve Prometheus /metrics on; empty disables it",
+	)
+	alertWebhook := flag.String(
+		"alert-webhook",
+		"",
+		"Slack-compatible incoming webhook URL for cost alerts (FR-R3); empty disables alerting",
+	)
+	alertThresholdINR := flag.Float64(
+		"alert-threshold-inr",
+		100.0,
+		"minimum estimated cost (INR, high end of range) before a finding can alert",
+	)
+	alertGrowthRatio := flag.Float64(
+		"alert-growth-ratio",
+		2.0,
+		"re-alert on a finding once its cost has grown by this multiple since the last alert",
+	)
+	flag.Parse()
 
-	// Open the flow map pinned by the eBPF loader.
-	m, err := ebpf.LoadPinnedMap(mapPath, nil)
+	// Load and attach the eBPF programs ourselves instead of assuming
+	// something outside the agent (bpftool, a shell script) already pinned
+	// the map — the agent now owns the full load/attach/detach lifecycle.
+	loader, m, err := Load(*bpfObject, *cgroupPath)
 	if err != nil {
-		log.Fatalf("open pinned map %s: %v", mapPath, err)
+		log.Fatalf("load eBPF programs: %v", err)
 	}
-	defer m.Close()
+	defer loader.Close()
 
-	fmt.Println("chidrixx-reader: scraping every 15s, Ctrl+C to stop")
+	priceBook, err := LoadPriceBook(*pricebookPath)
+	if err != nil {
+		log.Fatalf("load price book: %v", err)
+	}
 
-	// Previous map snapshot used to calculate deltas.
+	managedNets, err := parseManagedCIDRs(*managedCIDRsFlag)
+	if err != nil {
+		log.Fatalf("parse -managed-cidrs: %v", err)
+	}
+
+	nodeName := resolveNodeName(*nodeNameFlag)
+
+	fmt.Println("chidrixx-reader: Kubernetes-aware attribution enabled")
+	fmt.Println("scraping every 15s, Ctrl+C to stop")
+
+	// ---------------------------------------------------------
+	// Kubernetes metadata cache
+	// ---------------------------------------------------------
+	//
+	// Resolver currently understands:
+	//
+	//   Pod UID      -> workload
+	//   Container ID -> workload
+	//   Pod IP       -> workload
+	//   Service IP   -> Service
+	//   Endpoint IP  -> EndpointSlice backend
+	//   Service      -> candidate EndpointSlice backends
+	//
+	kube := NewKubernetesResolver()
+
+	// Cancelled on SIGINT/SIGTERM so both loops exit and we print a final
+	// report instead of dying mid-scrape.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if *metricsAddr != "" {
+		serveMetrics(ctx, *metricsAddr)
+		fmt.Printf("prometheus metrics on %s/metrics\n", *metricsAddr)
+	}
+
+	// Keep Kubernetes metadata synchronized with cluster changes.
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := kube.Refresh(); err != nil {
+					log.Printf(
+						"kubernetes metadata refresh: %v",
+						err,
+					)
+				}
+			}
+		}
+	}()
+
+	// Previous eBPF map snapshot used for delta calculation.
 	prev := make(map[FlowKey]FlowStat)
 
-	// Cumulative network cost aggregator.
-	agg := NewAggregate()
+	// Cumulative traffic/cost aggregator.
+	agg := NewAggregate(priceBook, kube.Zone, managedNets, *nodeHasPublicIP, nodeName)
 
-	// Resolves cgroup IDs into human-readable workload names.
-	// Implementation is in workload.go.
-	resolver := NewWorkloadResolver()
+	alerter := NewAlerter(*alertWebhook, *alertThresholdINR, *alertGrowthRatio)
 
+	// Resolves cgroup IDs into Kubernetes or host workload identities.
+	resolver := NewWorkloadResolver(kube)
+
+	// Scrape the eBPF flow map every 15 seconds.
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		prev = scrape(
-			m,
-			prev,
-			agg,
-			resolver,
-		)
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println("\nshutting down, final report:")
+			agg.PrintTop(100)
+			writeHTMLReport(agg, *htmlOut)
+			return
+		case <-ticker.C:
+			prev = scrape(
+				m,
+				prev,
+				agg,
+				resolver,
+				kube,
+			)
 
-		// Print the ten highest estimated network-cost findings.
-		agg.PrintTop(10)
+			// Print the highest-value findings currently observed.
+			agg.PrintTop(100)
+			writeHTMLReport(agg, *htmlOut)
+			recordCostMetrics(agg)
+			alerter.Check(agg.Findings())
+		}
+	}
+}
+
+// writeHTMLReport writes the HTML export (build manual Step 10.1) if
+// htmlOut is non-empty. A write failure is logged, not fatal — the CLI
+// report already succeeded, and an unwritable report path shouldn't kill
+// the agent.
+func writeHTMLReport(agg *Aggregate, htmlOut string) {
+	if htmlOut == "" {
+		return
+	}
+
+	if err := agg.WriteHTMLFile(htmlOut, 100); err != nil {
+		log.Printf("write HTML report %s: %v", htmlOut, err)
 	}
 }
