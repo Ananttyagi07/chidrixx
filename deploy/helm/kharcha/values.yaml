@@ -1,0 +1,52 @@
+image:
+  repository: chidrixx-agent
+  tag: dev
+  pullPolicy: IfNotPresent
+
+metricsPort: 9300
+
+# Whether this node has its own path to the internet (affects the
+# NAT-egress heuristic — see classify.go). Set false on nodes that only
+# reach the internet through a NAT gateway.
+nodeHasPublicIP: true
+
+# Comma-separated CIDRs of managed-service endpoints (RDS/MSK/ES/...) to
+# classify as MANAGED_SERVICE instead of plain internet/private traffic.
+managedCIDRs: ""
+
+# Overridable price book (build manual §9.1/§12/FR-E4) — swap in
+# negotiated enterprise rates here without rebuilding the image.
+pricebook:
+  cloud: aws
+  region: ap-south-1
+  last_verified: "2026-07-29"
+  unit: per_gb_usd
+  rates:
+    same_node: 0.0
+    same_az: 0.0
+    cross_az: 0.0088
+    cross_region: 0.0860
+    managed_service: 0.0088
+    private_offcluster: 0.0
+    nat_egress: 0.0450
+    internet_egress: 0.1093
+  fx:
+    usd_to_inr: 84.0
+
+# Cost alerting (FR-R3). Webhook URL is a secret, not a plain value: create
+# it yourself (`kubectl create secret generic kharcha-alert-webhook
+# --from-literal=url=https://hooks.slack.com/...`) and reference it here.
+# Leave webhookSecretName empty to disable alerting entirely.
+alerting:
+  webhookSecretName: ""
+  webhookSecretKey: "url"
+  thresholdINR: 100.0
+  growthRatio: 2.0
+
+resources: {}
+
+# eBPF program loading requires CAP_BPF against the real kernel. privileged
+# is the simplest path and what this chart uses by default; per the build
+# manual, tighten to the specific capabilities (BPF, PERFMON, NET_ADMIN)
+# once you've confirmed the minimal set on your kernel.
+privileged: true

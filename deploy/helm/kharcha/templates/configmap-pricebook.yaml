@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kharcha.fullname" . }}-pricebook
+  labels:
+    {{- include "kharcha.labels" . | nindent 4 }}
+data:
+  aws.yaml: |
+    {{- toYaml .Values.pricebook | nindent 4 }}

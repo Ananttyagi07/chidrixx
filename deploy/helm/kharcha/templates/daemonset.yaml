@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "kharcha.fullname" . }}
+  labels:
+    {{- include "kharcha.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kharcha
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kharcha
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ include "kharcha.fullname" . }}
+      containers:
+        - name: agent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - -bpf-object=/app/bpf/flow_cgroup.o
+            - -pricebook=/etc/kharcha/aws.yaml
+            - -html-out=/app/report.html
+            - -metrics-addr=:{{ .Values.metricsPort }}
+            - -node-has-public-ip={{ .Values.nodeHasPublicIP }}
+            - -managed-cidrs={{ .Values.managedCIDRs }}
+            - -alert-threshold-inr={{ .Values.alerting.thresholdINR }}
+            - -alert-growth-ratio={{ .Values.alerting.growthRatio }}
+            {{- if .Values.alerting.webhookSecretName }}
+            - -alert-webhook=$(ALERT_WEBHOOK_URL)
+            {{- end }}
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            {{- if .Values.alerting.webhookSecretName }}
+            - name: ALERT_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.alerting.webhookSecretName }}
+                  key: {{ .Values.alerting.webhookSecretKey }}
+            {{- end }}
+          securityContext:
+            privileged: {{ .Values.privileged }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metricsPort }}
+          volumeMounts:
+            - name: cgroup
+              mountPath: /sys/fs/cgroup
+            - name: pricebook
+              mountPath: /etc/kharcha
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+        - name: pricebook
+          configMap:
+            name: {{ include "kharcha.fullname" . }}-pricebook
