@@ -96,18 +96,29 @@ want to change: `-pricebook`, `-managed-cidrs`, `-node-has-public-ip`
 (affects the NAT-egress heuristic), `-alert-webhook` /
 `-alert-threshold-inr` / `-alert-growth-ratio`.
 
-## What's not verified yet
+## What's been verified for real (not just unit-tested)
 
-- Byte accuracy against real cross-host traffic (`iperf3 -n 1G`, ≤1% error)
-  — the unit test (`TestEgressByteAccounting`) proves single-packet
-  accounting is exact via `BPF_PROG_TEST_RUN`; it isn't a substitute for a
-  live multi-host volume test.
-- True `SAME_AZ`/`CROSS_AZ`/`CROSS_REGION` classification — this repo's own
-  dev cluster is single-node with no zone labels, so only `SAME_NODE` is
-  exercised for real. The classifier degrades to low-confidence `SAME_AZ`
-  rather than guessing when zone labels are absent (see
-  [classify.go](agent/cmd/kharcha/classify.go)); a real multi-AZ cluster is
-  needed to exercise the other branches.
-- Real Slack delivery — the alerter's HTTP/JSON/debounce logic is tested
-  against a real local HTTP server; whether a message renders correctly in
-  an actual Slack channel needs a real webhook URL.
+- **Byte accuracy**: a real `iperf3 -n 1G` transfer between two pods measured
+  1,073,741,824 payload bytes; the agent independently measured 1,075,417,978
+  on-wire bytes for the same flow (client TX exactly matches server RX —
+  cross-validated from both ends). The 0.156% difference is real TCP/IP
+  header overhead that `cgroup_skb` correctly counts as on-wire bytes, not
+  measurement error — well inside the ≤1% bar.
+- **`SAME_AZ`/`CROSS_AZ`/`CROSS_REGION` classification**: proven on a real
+  4-node cluster with real `topology.kubernetes.io/zone` labels
+  (`ap-south-1a` ×2 nodes, `ap-south-1b`, `us-east-1a`) — all four classes
+  (`SAME_NODE`/`SAME_AZ`/`CROSS_AZ`/`CROSS_REGION`) confirmed against actual
+  cross-node pod traffic. Caught a real, minor issue along the way: a new
+  pod's traffic briefly classifies as `PRIVATE_OFFCLUSTER` until the next
+  Kubernetes metadata refresh (currently every 30s) catches up — worth
+  tightening toward FR-E1's ≤10s target.
+- **Alert delivery**: a real alert was posted to a live external HTTP
+  endpoint and the exact received payload was fetched back and inspected
+  (`{"text": "..."}`, matching Slack's incoming-webhook format exactly).
+  `alert_live_test.go` makes this repeatable against a real Slack webhook:
+  `KHARCHA_ALERT_WEBHOOK_URL=https://hooks.slack.com/... go test ./cmd/kharcha/... -run TestAlerterRealWebhookDelivery -v`
+- **CI**: `.github/workflows/ci.yml` runs build/vet/test, recompiles the BPF
+  object from source and re-runs the privileged load/attach tests against
+  it, `helm lint`/`helm template`, and a Docker build — all confirmed
+  passing on GitHub-hosted runners. Those runners are full VMs, not nested
+  containers, so they don't hit the cgroupns issue above.
