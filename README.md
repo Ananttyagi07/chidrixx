@@ -149,3 +149,16 @@ want to change: `-pricebook`, `-managed-cidrs`, `-node-has-public-ip`
   it, `helm lint`/`helm template`, and a Docker build — all confirmed
   passing on GitHub-hosted runners. Those runners are full VMs, not nested
   containers, so they don't hit the cgroupns issue above.
+- **Chaos/safety (NFR-5)**: `test/chaos/chaos_test.sh` force-killed the
+  kharcha agent pod mid-traffic against a real client/server fixture —
+  0 non-200 responses out of 45 requests during the kill and DaemonSet
+  reschedule window. Confirms the architecture claim (`kharcha_egress`/
+  `kharcha_ingress` unconditionally `return 1`/SK_PASS, so the hooks only
+  count and never gate) against a real cluster, not just the source.
+- **Overhead (NFR-1)**: `test/bench/overhead_bench.sh` measured the agent
+  at 133m CPU / 9Mi memory on an 8-core node — 1.66% of allocatable CPU.
+  That's idle/current-traffic overhead on this dev cluster, not the
+  manual's precise "at 10k concurrent flows" bar (no synthetic
+  flow-generation harness exists yet to hit that), and it's above the
+  <1%-per-node target as measured here — worth another look once a real
+  load harness exists, rather than claiming the NFR is met.
