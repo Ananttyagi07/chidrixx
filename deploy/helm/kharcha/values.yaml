@@ -5,6 +5,12 @@ image:
 
 metricsPort: 9300
 
+# How often to refresh Kubernetes pod/service/endpoint/node metadata
+# (FR-E1 target: <=10s). Shorter means fresher attribution for newly
+# created pods but more kubectl-exec load on the API server per node
+# running this DaemonSet — tune upward on very large clusters.
+k8sRefreshInterval: 10s
+
 # Whether this node has its own path to the internet (affects the
 # NAT-egress heuristic — see classify.go). Set false on nodes that only
 # reach the internet through a NAT gateway.

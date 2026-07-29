@@ -25,6 +25,7 @@ spec:
             - -pricebook=/etc/kharcha/aws.yaml
             - -html-out=/app/report.html
             - -metrics-addr=:{{ .Values.metricsPort }}
+            - -k8s-refresh-interval={{ .Values.k8sRefreshInterval }}
             - -node-has-public-ip={{ .Values.nodeHasPublicIP }}
             - -managed-cidrs={{ .Values.managedCIDRs }}
             - -alert-threshold-inr={{ .Values.alerting.thresholdINR }}

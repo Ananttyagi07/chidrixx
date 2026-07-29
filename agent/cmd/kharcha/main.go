@@ -318,6 +318,12 @@ func main() {
 		"",
 		"this cluster's name, reported to the control plane; defaults to -node-name if unset",
 	)
+	k8sRefreshInterval := flag.Duration(
+		"k8s-refresh-interval",
+		10*time.Second,
+		"how often to refresh Kubernetes pod/service/endpoint/node metadata (FR-E1 target: <=10s); "+
+			"shorter means fresher destination attribution for newly-created pods but more kubectl exec load on the API server",
+	)
 	flag.Parse()
 
 	// Load and attach the eBPF programs ourselves instead of assuming
@@ -371,7 +377,7 @@ func main() {
 
 	// Keep Kubernetes metadata synchronized with cluster changes.
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(*k8sRefreshInterval)
 		defer ticker.Stop()
 
 		for {
