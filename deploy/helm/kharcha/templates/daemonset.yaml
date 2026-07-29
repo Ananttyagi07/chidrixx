@@ -48,6 +48,13 @@ spec:
                   name: {{ .Values.alerting.webhookSecretName }}
                   key: {{ .Values.alerting.webhookSecretKey }}
             {{- end }}
+            {{- if .Values.controlPlane.tokenSecretName }}
+            - name: CHIDRIXX_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controlPlane.tokenSecretName }}
+                  key: {{ .Values.controlPlane.tokenSecretKey }}
+            {{- end }}
           securityContext:
             privileged: {{ .Values.privileged }}
           ports:

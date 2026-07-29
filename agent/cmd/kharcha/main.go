@@ -401,7 +401,9 @@ func main() {
 	if effectiveClusterID == "" {
 		effectiveClusterID = nodeName
 	}
-	shipper := NewShipper(*controlPlaneURL, effectiveClusterID)
+	// Read from the environment, not a flag, so the token never shows up
+	// in `ps`/container specs — same reasoning as the control plane side.
+	shipper := NewShipper(*controlPlaneURL, effectiveClusterID, os.Getenv("CHIDRIXX_AUTH_TOKEN"))
 
 	// Resolves cgroup IDs into Kubernetes or host workload identities.
 	resolver := NewWorkloadResolver(kube)

@@ -28,7 +28,7 @@ func TestShipperWireFormatMatchesControlPlaneContract(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	shipper := NewShipper(srv.URL, "chidrixx-lab")
+	shipper := NewShipper(srv.URL, "chidrixx-lab", "")
 
 	findings := []*Finding{
 		{
@@ -70,9 +70,35 @@ func TestShipperWireFormatMatchesControlPlaneContract(t *testing.T) {
 // TestShipperDisabledWithoutURL proves an empty control-plane URL is a
 // clean no-op — the default, unconfigured state — not an error.
 func TestShipperDisabledWithoutURL(t *testing.T) {
-	shipper := NewShipper("", "chidrixx-lab")
+	shipper := NewShipper("", "chidrixx-lab", "")
 
 	if err := shipper.Ship(context.Background(), []*Finding{{Source: "ns/app"}}); err != nil {
 		t.Fatalf("expected no-op with empty URL, got error: %v", err)
+	}
+}
+
+// TestShipperSendsBasicAuthToken proves the agent actually sends
+// credentials in the form the control plane's requireToken middleware
+// checks (Basic Auth password field) — this is the other half of that
+// contract; a mismatch here would silently lock every agent out of an
+// authenticated control plane.
+func TestShipperSendsBasicAuthToken(t *testing.T) {
+	var gotPass string
+	var gotOK bool
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, gotPass, gotOK = r.BasicAuth()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	shipper := NewShipper(srv.URL, "chidrixx-lab", "secret-token")
+
+	if err := shipper.Ship(context.Background(), []*Finding{{Source: "ns/app"}}); err != nil {
+		t.Fatalf("Ship: %v", err)
+	}
+
+	if !gotOK || gotPass != "secret-token" {
+		t.Fatalf("Basic Auth password = %q (present=%v), want %q", gotPass, gotOK, "secret-token")
 	}
 }

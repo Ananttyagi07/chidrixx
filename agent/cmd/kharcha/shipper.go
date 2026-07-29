@@ -39,13 +39,15 @@ type shipperRequest struct {
 type Shipper struct {
 	url        string
 	clusterID  string
+	authToken  string
 	httpClient *http.Client
 }
 
-func NewShipper(url, clusterID string) *Shipper {
+func NewShipper(url, clusterID, authToken string) *Shipper {
 	return &Shipper{
 		url:        url,
 		clusterID:  clusterID,
+		authToken:  authToken,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -84,6 +86,14 @@ func (s *Shipper) Ship(ctx context.Context, findings []*Finding) error {
 		return fmt.Errorf("build ship request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if s.authToken != "" {
+		// Basic Auth, not Bearer: matches the control plane's
+		// requireToken, which checks the Basic Auth password field so a
+		// human viewing the dashboard in a plain browser and this agent
+		// posting JSON can share one auth mechanism. Username is ignored
+		// on the receiving end.
+		req.SetBasicAuth("agent", s.authToken)
+	}
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
