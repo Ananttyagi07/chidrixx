@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package main
 
 // Finding is the wire format an agent ships one row of its cumulative
