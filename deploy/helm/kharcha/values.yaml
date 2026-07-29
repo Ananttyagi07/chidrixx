@@ -51,9 +51,11 @@ alerting:
 
 # Ship this cluster's aggregates to a control plane for a multi-cluster
 # view (FR-C1/§13). Leave url empty to keep this cluster local-only —
-# nothing leaves the node by default. If the control plane has
-# CHIDRIXX_AUTH_TOKEN set, create a matching secret yourself
-# (`kubectl create secret generic kharcha-controlplane-token
+# nothing leaves the node by default. If deploy/helm/controlplane is
+# installed in-cluster as release "chidrixx", its Service DNS name is
+# http://chidrixx-controlplane.<namespace>.svc.cluster.local:8090/api/v1/ingest.
+# If the control plane has CHIDRIXX_AUTH_TOKEN set, create a matching
+# secret yourself (`kubectl create secret generic kharcha-controlplane-token
 # --from-literal=token=...`) and reference it here — same pattern as
 # alerting's webhook secret, for the same reason (a shared credential
 # doesn't belong in a plain Helm value).

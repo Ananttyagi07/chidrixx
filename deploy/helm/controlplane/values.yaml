@@ -1,0 +1,29 @@
+image:
+  repository: chidrixx-controlplane
+  tag: dev
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8090
+
+# The SQLite store needs to survive pod restarts/rescheduling — a single
+# ReadWriteOnce volume is enough since this runs as one replica (SQLite is
+# single-writer; don't scale this beyond 1 without moving to a real
+# server-based store first).
+persistence:
+  enabled: true
+  size: 2Gi
+  storageClassName: ""
+
+# Auth (see controlplane/auth.go). Token is a secret, not a plain value:
+# create it yourself
+# (`kubectl create secret generic chidrixx-controlplane-token
+#  --from-literal=token=...`) and reference it here. Leave tokenSecretName
+# empty to run unauthenticated — fine for a quick local trial, not for
+# anything reachable beyond a trusted network.
+auth:
+  tokenSecretName: ""
+  tokenSecretKey: "token"
+
+resources: {}

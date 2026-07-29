@@ -52,6 +52,33 @@ See [deploy/helm/kharcha/values.yaml](deploy/helm/kharcha/values.yaml) for
 the price book, managed-service CIDRs, NAT-egress heuristic toggle, and
 alert-webhook (Secret-backed) knobs.
 
+### Multi-cluster control plane (optional)
+
+The agent works standalone (CLI/HTML/Prometheus, single cluster) with no
+control plane at all. For a multi-cluster view, deploy
+[controlplane/](controlplane) and point one or more agents at it:
+
+```bash
+docker build -t chidrixx-controlplane:dev -f controlplane/Dockerfile controlplane/
+k3d image import chidrixx-controlplane:dev -c <your-cluster>
+helm install chidrixx deploy/helm/controlplane -n chidrixx --create-namespace
+
+# then, per agent:
+helm upgrade kharcha deploy/helm/kharcha -n kharcha \
+  --set controlPlane.url=http://chidrixx-controlplane.chidrixx.svc.cluster.local:8090/api/v1/ingest \
+  --set controlPlane.clusterID=<a-name-for-this-cluster>
+```
+
+By default the control plane is unauthenticated — fine for a quick local
+trial, not for anything reachable beyond a trusted network. Set a shared
+token on both sides via `CHIDRIXX_AUTH_TOKEN` (control plane) and the
+matching `controlPlane.tokenSecretName`/`auth.tokenSecretName` Helm values
+(agent/control plane respectively) — see
+[deploy/helm/controlplane/values.yaml](deploy/helm/controlplane/values.yaml).
+Basic Auth, not Bearer, deliberately: it's the one mechanism that works
+naturally for both an agent posting JSON and a human viewing the
+dashboard in a plain browser.
+
 ### Known limitation: cgroup namespaces
 
 The agent needs to attach `cgroup_skb` programs at the node's cgroup v2

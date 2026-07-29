@@ -1,0 +1,6 @@
+apiVersion: v2
+name: chidrixx-controlplane
+description: Multi-cluster ingest API, storage, and dashboard for the chidrixx/kharcha agent
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
