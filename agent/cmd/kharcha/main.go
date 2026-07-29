@@ -307,6 +307,16 @@ func main() {
 		2.0,
 		"re-alert on a finding once its cost has grown by this multiple since the last alert",
 	)
+	controlPlaneURL := flag.String(
+		"controlplane-url",
+		"",
+		"control plane ingest endpoint (e.g. http://chidrixx-controlplane:8090/api/v1/ingest); empty disables shipping",
+	)
+	clusterID := flag.String(
+		"cluster-id",
+		"",
+		"this cluster's name, reported to the control plane; defaults to -node-name if unset",
+	)
 	flag.Parse()
 
 	// Load and attach the eBPF programs ourselves instead of assuming
@@ -386,6 +396,12 @@ func main() {
 
 	alerter := NewAlerter(*alertWebhook, *alertThresholdINR, *alertGrowthRatio)
 
+	effectiveClusterID := *clusterID
+	if effectiveClusterID == "" {
+		effectiveClusterID = nodeName
+	}
+	shipper := NewShipper(*controlPlaneURL, effectiveClusterID)
+
 	// Resolves cgroup IDs into Kubernetes or host workload identities.
 	resolver := NewWorkloadResolver(kube)
 
@@ -414,6 +430,10 @@ func main() {
 			writeHTMLReport(agg, *htmlOut)
 			recordCostMetrics(agg)
 			alerter.Check(agg.Findings())
+
+			if err := shipper.Ship(ctx, agg.Findings()); err != nil {
+				log.Printf("ship to control plane: %v", err)
+			}
 		}
 	}
 }

@@ -37,15 +37,17 @@ func TestKubernetesResolverAgainstRealCluster(t *testing.T) {
 
 	// This lab is single-node, so every pod's node has no zone label —
 	// Zone() must degrade to "" rather than fabricate one, and a
-	// same-node flow must still classify as SAME_NODE with high
-	// confidence even without any zone information at all.
+	// A same-node flow must classify as SAME_NODE with high confidence
+	// regardless of whether the node carries a zone label — SAME_NODE is
+	// decided before zone comparison ever runs. Deliberately not asserting
+	// on kube.Zone()'s specific value here: this lab started single-node
+	// with no zone labels, then gained real topology.kubernetes.io/zone
+	// labels during multi-AZ testing, and either state is valid — the
+	// empty-zone degradation path itself is covered by the pure unit test
+	// in classify_test.go, not by asserting a specific state of this lab.
 	nodeName := backends[0].NodeName
 	if nodeName == "" {
 		t.Fatal("expected the resolved backend to carry a node name")
-	}
-
-	if zone := kube.Zone(nodeName); zone != "" {
-		t.Fatalf("Zone(%s) = %q, want \"\" (this lab's node carries no zone label)", nodeName, zone)
 	}
 
 	class, confidence := Classify(ClassifyInput{

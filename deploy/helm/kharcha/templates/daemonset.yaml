@@ -32,6 +32,10 @@ spec:
             {{- if .Values.alerting.webhookSecretName }}
             - -alert-webhook=$(ALERT_WEBHOOK_URL)
             {{- end }}
+            {{- if .Values.controlPlane.url }}
+            - -controlplane-url={{ .Values.controlPlane.url }}
+            - -cluster-id={{ .Values.controlPlane.clusterID | default .Release.Namespace }}
+            {{- end }}
           env:
             - name: NODE_NAME
               valueFrom:

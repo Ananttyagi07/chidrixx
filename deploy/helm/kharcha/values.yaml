@@ -43,6 +43,13 @@ alerting:
   thresholdINR: 100.0
   growthRatio: 2.0
 
+# Ship this cluster's aggregates to a control plane for a multi-cluster
+# view (FR-C1/§13). Leave url empty to keep this cluster local-only —
+# nothing leaves the node by default.
+controlPlane:
+  url: ""
+  clusterID: ""
+
 resources: {}
 
 # eBPF program loading requires CAP_BPF against the real kernel. privileged
