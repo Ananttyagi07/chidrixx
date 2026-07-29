@@ -2,3 +2,6 @@ agent/chidrixx-reader
 agent/kharcha
 report.html
 report.html.tmp
+controlplane/chidrixx-controlplane
+controlplane/controlplane.db
+controlplane/*.db
