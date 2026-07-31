@@ -2,9 +2,13 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -191,8 +195,98 @@ type KubeNode struct {
 	InternalIP string
 }
 
+// kubeAPIClient talks to the API server directly over HTTPS, reusing one
+// keep-alive connection across refresh cycles. It exists because shelling
+// out to kubectl four times per refresh (pods/services/endpointslices/nodes)
+// forks a whole new process and TLS handshake each time — measured as the
+// dominant share of the agent's CPU overhead in practice, far more than the
+// eBPF map scrape itself. Only usable in-cluster, where the projected
+// service account token/CA are mounted; local dev without them falls back
+// to the kubectl-exec path unchanged.
+type kubeAPIClient struct {
+	baseURL    string
+	tokenFile  string
+	httpClient *http.Client
+}
+
+func newKubeAPIClient() *kubeAPIClient {
+	host := os.Getenv("KUBERNETES_SERVICE_HOST")
+	port := os.Getenv("KUBERNETES_SERVICE_PORT")
+
+	if host == "" || port == "" {
+		return nil
+	}
+
+	tokenFile := filepath.Join(serviceAccountDir, "token")
+	caFile := filepath.Join(serviceAccountDir, "ca.crt")
+
+	if _, err := os.Stat(tokenFile); err != nil {
+		return nil
+	}
+
+	caCert, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil
+	}
+
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caCert) {
+		return nil
+	}
+
+	return &kubeAPIClient{
+		baseURL:   fmt.Sprintf("https://%s:%s", host, port),
+		tokenFile: tokenFile,
+		httpClient: &http.Client{
+			Timeout: 15 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig:     &tls.Config{RootCAs: pool},
+				MaxIdleConnsPerHost: 4,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
+	}
+}
+
+// get fetches a path from the API server. The token is re-read on every
+// call, not cached, so projected service account token rotation is handled
+// for free — same rationale as tokenFile in ensureKubeconfig.
+func (c *kubeAPIClient) get(path string) ([]byte, error) {
+	token, err := os.ReadFile(c.tokenFile)
+	if err != nil {
+		return nil, fmt.Errorf("read service account token: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s: unexpected status %d: %s", path, resp.StatusCode, string(body))
+	}
+
+	return body, nil
+}
+
 type KubernetesResolver struct {
 	mu sync.RWMutex
+
+	api *kubeAPIClient
 
 	byPodUID      map[string]*KubeWorkload
 	byContainerID map[string]*KubeWorkload
@@ -217,6 +311,7 @@ func NewKubernetesResolver() *KubernetesResolver {
 	}
 
 	r := &KubernetesResolver{
+		api:               newKubeAPIClient(),
 		byPodUID:          make(map[string]*KubeWorkload),
 		byContainerID:     make(map[string]*KubeWorkload),
 		byIP:              make(map[string]*KubeWorkload),
@@ -376,23 +471,30 @@ func int32Value(v *int32) int32 {
 	return *v
 }
 
+// fetch returns the raw JSON for one resource list, preferring a direct
+// API server call (apiPath) when in-cluster credentials are available and
+// falling back to shelling out to kubectl (kubectlArgs) otherwise.
+func (r *KubernetesResolver) fetch(apiPath string, kubectlArgs ...string) ([]byte, error) {
+	if r.api != nil {
+		return r.api.get(apiPath)
+	}
+
+	out, err := exec.Command("kubectl", kubectlArgs...).Output()
+	if err != nil {
+		return nil, fmt.Errorf("kubectl %s: %w", strings.Join(kubectlArgs, " "), err)
+	}
+
+	return out, nil
+}
+
 func (r *KubernetesResolver) Refresh() error {
 	// --------------------------------------------------
 	// Pods
 	// --------------------------------------------------
 
-	podCmd := exec.Command(
-		"kubectl",
-		"get",
-		"pods",
-		"-A",
-		"-o",
-		"json",
-	)
-
-	podOut, err := podCmd.Output()
+	podOut, err := r.fetch("/api/v1/pods", "get", "pods", "-A", "-o", "json")
 	if err != nil {
-		return fmt.Errorf("kubectl get pods: %w", err)
+		return fmt.Errorf("list pods: %w", err)
 	}
 
 	var podList kubePodList
@@ -459,18 +561,9 @@ func (r *KubernetesResolver) Refresh() error {
 	// Services
 	// --------------------------------------------------
 
-	serviceCmd := exec.Command(
-		"kubectl",
-		"get",
-		"services",
-		"-A",
-		"-o",
-		"json",
-	)
-
-	serviceOut, err := serviceCmd.Output()
+	serviceOut, err := r.fetch("/api/v1/services", "get", "services", "-A", "-o", "json")
 	if err != nil {
-		return fmt.Errorf("kubectl get services: %w", err)
+		return fmt.Errorf("list services: %w", err)
 	}
 
 	var serviceList kubeServiceList
@@ -512,18 +605,12 @@ func (r *KubernetesResolver) Refresh() error {
 	// EndpointSlices
 	// --------------------------------------------------
 
-	endpointCmd := exec.Command(
-		"kubectl",
-		"get",
-		"endpointslices",
-		"-A",
-		"-o",
-		"json",
+	endpointOut, err := r.fetch(
+		"/apis/discovery.k8s.io/v1/endpointslices",
+		"get", "endpointslices", "-A", "-o", "json",
 	)
-
-	endpointOut, err := endpointCmd.Output()
 	if err != nil {
-		return fmt.Errorf("kubectl get endpointslices: %w", err)
+		return fmt.Errorf("list endpointslices: %w", err)
 	}
 
 	var endpointList kubeEndpointSliceList
@@ -601,17 +688,9 @@ func (r *KubernetesResolver) Refresh() error {
 	// Nodes (topology: zone + internal IP)
 	// --------------------------------------------------
 
-	nodeCmd := exec.Command(
-		"kubectl",
-		"get",
-		"nodes",
-		"-o",
-		"json",
-	)
-
-	nodeOut, err := nodeCmd.Output()
+	nodeOut, err := r.fetch("/api/v1/nodes", "get", "nodes", "-o", "json")
 	if err != nil {
-		return fmt.Errorf("kubectl get nodes: %w", err)
+		return fmt.Errorf("list nodes: %w", err)
 	}
 
 	var nodeList kubeNodeList

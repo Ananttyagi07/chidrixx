@@ -155,10 +155,17 @@ want to change: `-pricebook`, `-managed-cidrs`, `-node-has-public-ip`
   reschedule window. Confirms the architecture claim (`kharcha_egress`/
   `kharcha_ingress` unconditionally `return 1`/SK_PASS, so the hooks only
   count and never gate) against a real cluster, not just the source.
-- **Overhead (NFR-1)**: `test/bench/overhead_bench.sh` measured the agent
-  at 133m CPU / 9Mi memory on an 8-core node — 1.66% of allocatable CPU.
-  That's idle/current-traffic overhead on this dev cluster, not the
-  manual's precise "at 10k concurrent flows" bar (no synthetic
-  flow-generation harness exists yet to hit that), and it's above the
-  <1%-per-node target as measured here — worth another look once a real
-  load harness exists, rather than claiming the NFR is met.
+- **Overhead (NFR-1)**: `test/bench/overhead_bench.sh` first measured the
+  agent at 133m CPU / 9Mi memory on an 8-core node — 1.66% of allocatable
+  CPU, over the <1%-per-node target. Root cause: `KubernetesResolver.Refresh`
+  ([agent/cmd/kharcha/kubernetes.go](agent/cmd/kharcha/kubernetes.go)) shelled
+  out to `kubectl` four times (pods/services/endpointslices/nodes) every
+  refresh cycle — each invocation forks a whole new process and TLS
+  handshake, dwarfing the actual eBPF map scrape cost. Fixed by talking to
+  the API server directly over a single keep-alive `http.Client` using the
+  mounted service-account token/CA (falling back to the original
+  kubectl-exec path when running outside a cluster, for local dev). Re-measured
+  after the fix: **4m CPU, 0.05% of allocatable** — comfortably under budget.
+  Still idle/current-traffic overhead on this dev cluster, not the manual's
+  precise "at 10k concurrent flows" bar (no synthetic flow-generation
+  harness exists yet to hit that).
