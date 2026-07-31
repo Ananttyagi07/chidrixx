@@ -20,8 +20,8 @@ export function SpendTrendChart({ points }: { points: CostTrendPoint[] }) {
       <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
         <defs>
           <linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--series-blue)" stopOpacity={0.1} />
-            <stop offset="100%" stopColor="var(--series-blue)" stopOpacity={0} />
+            <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.1} />
+            <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
           </linearGradient>
         </defs>
         <XAxis
@@ -50,7 +50,7 @@ export function SpendTrendChart({ points }: { points: CostTrendPoint[] }) {
         <Area
           type="monotone"
           dataKey="cost"
-          stroke="var(--series-blue)"
+          stroke="var(--accent)"
           strokeWidth={2}
           fill="url(#trendFill)"
           dot={false}

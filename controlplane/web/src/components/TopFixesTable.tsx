@@ -64,7 +64,7 @@ function FixRow({ finding: f }: { finding: FindingRow }) {
           {f.fix_manifest && (
             <button
               onClick={() => setOpen((o) => !o)}
-              className="ml-2 text-[var(--series-blue)] hover:underline"
+              className="ml-2 text-[var(--accent)] hover:underline"
             >
               {open ? "hide manifest" : "view manifest"}
             </button>
