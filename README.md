@@ -203,3 +203,14 @@ want to change: `-pricebook`, `-managed-cidrs`, `-node-has-public-ip`
   with it, and the control plane's `/api/v1/findings` API returned real
   findings shipped by the real agent (`ClusterID: chidrixx-lab`, live
   timestamps) — not the curl-simulated ingestion used earlier.
+- **Genuine two-real-cluster multi-cluster proof**: spun up a second, fully
+  independent k3d cluster (its own Docker network, its own agent
+  install — not a curl simulating a second cluster ID) and pointed its
+  agent at the same control plane by connecting the two clusters' Docker
+  networks and exposing the control plane via a NodePort. Confirmed
+  `/api/v1/findings` returned real findings tagged with both `chidrixx-lab`
+  and `chidrixx-lab-2`, and the dashboard rendered both cluster cards. Also
+  incidentally reconfirmed the cgroupns=host fix generalizes: the second
+  cluster's agent attached its `cgroup_skb` programs with no special
+  handling. Torn down afterward — this was a proof, not a permanent
+  fixture.
