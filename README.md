@@ -42,10 +42,24 @@ exiting.
 
 ## Running in a cluster (Helm)
 
+The chart's default image is published on GHCR
+(`ghcr.io/ananttyagi07/chidrixx-agent:latest`). Note: as of this writing
+that package is still private — pulling it from outside this account needs
+either the package set to public or an `imagePullSecrets` entry with a
+token that can read it. Once public, a plain install works against any
+cluster with no local build step:
+
+```bash
+helm install kharcha deploy/helm/kharcha -n kharcha --create-namespace
+```
+
+To iterate on a local change instead of pulling the published image:
+
 ```bash
 docker build -t chidrixx-agent:dev .
-k3d image import chidrixx-agent:dev -c <your-cluster>   # or push to a real registry
-helm install kharcha deploy/helm/kharcha -n kharcha --create-namespace
+k3d image import chidrixx-agent:dev -c <your-cluster>   # or push your own build to a registry
+helm install kharcha deploy/helm/kharcha -n kharcha --create-namespace \
+  --set image.repository=chidrixx-agent --set image.tag=dev
 ```
 
 See [deploy/helm/kharcha/values.yaml](deploy/helm/kharcha/values.yaml) for
@@ -56,11 +70,11 @@ alert-webhook (Secret-backed) knobs.
 
 The agent works standalone (CLI/HTML/Prometheus, single cluster) with no
 control plane at all. For a multi-cluster view, deploy
-[controlplane/](controlplane) and point one or more agents at it:
+[controlplane/](controlplane) (also published at
+`ghcr.io/ananttyagi07/chidrixx-controlplane:latest`) and point one or more
+agents at it:
 
 ```bash
-docker build -t chidrixx-controlplane:dev -f controlplane/Dockerfile controlplane/
-k3d image import chidrixx-controlplane:dev -c <your-cluster>
 helm install chidrixx deploy/helm/controlplane -n chidrixx --create-namespace
 
 # then, per agent:

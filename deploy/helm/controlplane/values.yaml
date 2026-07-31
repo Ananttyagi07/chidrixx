@@ -1,6 +1,6 @@
 image:
-  repository: chidrixx-controlplane
-  tag: dev
+  repository: ghcr.io/ananttyagi07/chidrixx-controlplane
+  tag: latest
   pullPolicy: IfNotPresent
 
 service:

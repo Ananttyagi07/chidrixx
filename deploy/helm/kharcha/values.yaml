@@ -1,6 +1,6 @@
 image:
-  repository: chidrixx-agent
-  tag: dev
+  repository: ghcr.io/ananttyagi07/chidrixx-agent
+  tag: latest
   pullPolicy: IfNotPresent
 
 metricsPort: 9300
