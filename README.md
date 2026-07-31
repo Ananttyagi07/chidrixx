@@ -179,3 +179,13 @@ want to change: `-pricebook`, `-managed-cidrs`, `-node-has-public-ip`
   re-running the same test: **10,543 concurrent flows tracked, agent CPU at
   27m — 0.34% of allocatable** — genuinely inside the ≤1% NFR-1 bar at the
   scale the manual actually asks for, not just under light traffic.
+- **Control-plane Helm chart, actually `helm install`ed**: every prior
+  control-plane test ran the binary directly (`docker run`), never through
+  [deploy/helm/controlplane](deploy/helm/controlplane) itself. Installed it
+  for real (`helm install chidrixx deploy/helm/controlplane -n chidrixx`,
+  token-secret-backed auth, PVC bound via the cluster's `local-path`
+  storage class), then `helm upgrade`d the real `kharcha` agent release to
+  point at it. Confirmed end-to-end: 401 without the Basic Auth token, 200
+  with it, and the control plane's `/api/v1/findings` API returned real
+  findings shipped by the real agent (`ClusterID: chidrixx-lab`, live
+  timestamps) — not the curl-simulated ingestion used earlier.
