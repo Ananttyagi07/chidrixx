@@ -1,0 +1,20 @@
+chidrixx control plane deployed.
+
+{{- $authSecret := include "chidrixx-controlplane.authSecretName" . }}
+{{- if $authSecret }}
+
+Auth is enabled. Fetch the token to use it (from a browser, or to wire up
+a kharcha agent's controlPlane.tokenSecretName in another cluster):
+
+  kubectl get secret -n {{ .Release.Namespace }} {{ $authSecret }} \
+    -o jsonpath='{.data.{{ .Values.auth.tokenSecretKey }}}' | base64 -d
+
+{{- else }}
+
+Auth is DISABLED (auth.generate=false, no auth.tokenSecretName set) — the
+dashboard and ingest API are open to anything that can reach the Service.
+Fine for a quick local trial, not for anything reachable beyond a trusted
+network.
+{{- end }}
+
+Service: {{ include "chidrixx-controlplane.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}

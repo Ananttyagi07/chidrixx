@@ -225,3 +225,15 @@ want to change: `-pricebook`, `-managed-cidrs`, `-node-has-public-ip`
   change above (still private) had silently made the *next* upgrade of
   this same release try to pull the private image — fixed by pinning
   `image.repository`/`image.tag` explicitly until the packages go public.
+- **Helm-managed auth token**: bootstrapping used to mean coming up with
+  your own token and manually `kubectl create secret`-ing it on both
+  sides. The control plane now auto-generates and manages its own token
+  secret by default (`auth.generate: true`), kept stable across upgrades
+  via a `lookup` check (verified for real: two consecutive `helm upgrade`s
+  produced the identical token, not a fresh one each time) and surfaced in
+  `NOTES.txt`. Syncing that token to the agent's *independent* Helm release
+  is still one manual copy — there's no shared secret store between two
+  separate releases, possibly in different clusters — but re-ran the whole
+  ship pipeline with the freshly-generated token end-to-end (real findings
+  visible through the control plane's API) to confirm it actually works,
+  not just renders.

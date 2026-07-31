@@ -16,15 +16,29 @@ persistence:
   size: 2Gi
   storageClassName: ""
 
-# Auth (see controlplane/auth.go). Token is a secret, not a plain value:
-# create it yourself
-# (`kubectl create secret generic chidrixx-controlplane-token
-#  --from-literal=token=...`) and reference it here. Leave tokenSecretName
-# empty to run unauthenticated — fine for a quick local trial, not for
-# anything reachable beyond a trusted network.
+# Auth (see controlplane/auth.go). Secure by default: if tokenSecretName is
+# left empty and generate=true, the chart creates and manages its own
+# random token secret (kept stable across upgrades via a `lookup` check —
+# it only generates once, never rotates one it finds). Fetch it for the
+# agent side with:
+#   kubectl get secret -n <namespace> <release>-controlplane-auth-token \
+#     -o jsonpath='{.data.token}' | base64 -d
+# (also printed in `helm install`/`helm upgrade` NOTES).
+#
+# There is no way to auto-sync this to the kharcha agent's Helm release
+# automatically — they're independent releases, possibly in different
+# clusters, with no shared secret store between them. That one copy step
+# is still manual; this only removes the "come up with your own token and
+# create both secrets by hand" step.
+#
+# Set generate=false (with tokenSecretName still empty) to run fully
+# unauthenticated instead — fine for a quick local trial, not for anything
+# reachable beyond a trusted network. Set tokenSecretName to use a secret
+# you manage yourself instead of the generated one.
 auth:
   tokenSecretName: ""
   tokenSecretKey: "token"
+  generate: true
 
 resources: {}
 
