@@ -1,0 +1,82 @@
+# Synthetic 10k-concurrent-flow load fixture for NFR-1 validation
+# (test/bench/overhead_bench.sh's own header flags this gap: idle/current-
+# traffic overhead isn't the same as overhead "at 10k concurrent flows").
+#
+# 20 sink replicas x 20 driver-Job pods x 500 connections each = 10,000
+# concurrent TCP connections, spread thin enough on both ends to stay well
+# under typical per-container open-file-descriptor limits.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chidrixx-loadtest
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen-sink
+  namespace: chidrixx-loadtest
+spec:
+  replicas: 20
+  selector:
+    matchLabels:
+      app: loadgen-sink
+  template:
+    metadata:
+      labels:
+        app: loadgen-sink
+    spec:
+      containers:
+        - name: sink
+          image: chidrixx-loadgen:dev
+          imagePullPolicy: IfNotPresent
+          args: ["-mode=serve", "-addr=:9500"]
+          ports:
+            - containerPort: 9500
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loadgen-sink
+  namespace: chidrixx-loadtest
+spec:
+  selector:
+    app: loadgen-sink
+  ports:
+    - port: 9500
+      targetPort: 9500
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: loadgen-drive
+  namespace: chidrixx-loadtest
+spec:
+  parallelism: 20
+  completions: 20
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: drive
+          image: chidrixx-loadgen:dev
+          imagePullPolicy: IfNotPresent
+          args:
+            - "-mode=drive"
+            - "-target=loadgen-sink.chidrixx-loadtest.svc.cluster.local:9500"
+            - "-concurrency=500"
+            - "-duration=60s"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

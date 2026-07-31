@@ -166,6 +166,16 @@ want to change: `-pricebook`, `-managed-cidrs`, `-node-has-public-ip`
   mounted service-account token/CA (falling back to the original
   kubectl-exec path when running outside a cluster, for local dev). Re-measured
   after the fix: **4m CPU, 0.05% of allocatable** — comfortably under budget.
-  Still idle/current-traffic overhead on this dev cluster, not the manual's
-  precise "at 10k concurrent flows" bar (no synthetic flow-generation
-  harness exists yet to hit that).
+  That was still idle/current-traffic overhead, not the manual's precise
+  "at 10k concurrent flows" bar — closing that gap surfaced a second real
+  bug: the eBPF map itself
+  ([bpf/flow_cgroup.c](bpf/flow_cgroup.c)) was capped at `max_entries=4096`
+  and silently LRU-evicted under load. [test/load/](test/load) is a
+  purpose-built flow generator (20 sink replicas + a 20-pod Job driving 500
+  held-open TCP connections each, ~10k concurrent flows total, since the
+  existing nginx test fixture can't sustain that many on its own) that
+  caught it: tracked flows plateaued at ~3.6k instead of the ~9.7k
+  connections actually open. Fixed by sizing the map up to 16384 and
+  re-running the same test: **10,543 concurrent flows tracked, agent CPU at
+  27m — 0.34% of allocatable** — genuinely inside the ≤1% NFR-1 bar at the
+  scale the manual actually asks for, not just under light traffic.

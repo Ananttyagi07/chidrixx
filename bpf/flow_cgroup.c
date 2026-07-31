@@ -22,7 +22,12 @@ struct flow_stat {
 
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_PERCPU_HASH);
-    __uint(max_entries, 4096);
+    // 4096 silently LRU-evicted under real load: a 20x500-connection
+    // synthetic flow test (test/load/) plateaued at ~3.6k tracked flows
+    // instead of the ~9.7k actually-open connections. Sized up so NFR-1's
+    // 10k-concurrent-flow bar doesn't get quietly discarded by the map
+    // itself before the agent even sees it.
+    __uint(max_entries, 16384);
     __type(key, struct flow_key);
     __type(value, struct flow_stat);
 } flows SEC(".maps");
