@@ -1,21 +1,29 @@
+import { motion } from "framer-motion";
 import { Area, AreaChart, ResponsiveContainer } from "recharts";
 import type { ClusterSummaryView } from "../types";
 import { formatINR, relativeTime } from "../format";
+import { cardMotion } from "../motion";
+import { AnimatedNumber } from "./AnimatedNumber";
 
 export function ClusterCard({ cluster }: { cluster: ClusterSummaryView }) {
   const data = cluster.trend.map((p) => ({ cost: p.CostHigh }));
 
   return (
-    <div className="flex flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--card-shadow)]">
+    <motion.div
+      {...cardMotion}
+      className="flex flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--card-shadow)]"
+    >
       <div className="flex items-baseline justify-between gap-2">
         <span className="font-mono text-sm font-semibold">{cluster.ClusterID}</span>
         <span className="whitespace-nowrap text-xs text-[var(--ink-muted)]">
           {relativeTime(cluster.LastSeen)}
         </span>
       </div>
-      <div className="text-lg font-semibold tabular-nums text-[var(--ink)]">
-        {formatINR(cluster.CostHighINR)}
-      </div>
+      <AnimatedNumber
+        value={cluster.CostHighINR}
+        format={formatINR}
+        className="text-lg font-semibold tabular-nums text-[var(--ink)]"
+      />
       <div className="text-xs text-[var(--ink-secondary)]">{cluster.FindingCount} findings</div>
       {data.length > 1 && (
         <div className="h-8">
@@ -34,12 +42,13 @@ export function ClusterCard({ cluster }: { cluster: ClusterSummaryView }) {
                 strokeWidth={2}
                 fill={`url(#spark-${cluster.ClusterID})`}
                 dot={false}
-                isAnimationActive={false}
+                isAnimationActive
+                animationDuration={700}
               />
             </AreaChart>
           </ResponsiveContainer>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }

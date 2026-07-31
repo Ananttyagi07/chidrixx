@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { IconCalendar, IconDownload, IconFilter, IconSun } from "../icons";
 import type { DashboardSummary } from "../types";
 
@@ -8,6 +9,8 @@ function greeting(): string {
   if (h < 17) return "Good afternoon";
   return "Good evening";
 }
+
+const tapPress = { whileTap: { scale: 0.96 }, whileHover: { y: -1 } };
 
 export function Topbar({ data }: { data: DashboardSummary | null }) {
   const [soonMsg, setSoonMsg] = useState<string | null>(null);
@@ -36,7 +39,13 @@ export function Topbar({ data }: { data: DashboardSummary | null }) {
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold">
             {greeting()}
-            <IconSun className="h-5 w-5 text-[var(--accent)]" />
+            <motion.span
+              animate={{ rotate: 360 }}
+              transition={{ duration: 16, repeat: Infinity, ease: "linear" }}
+              className="inline-flex"
+            >
+              <IconSun className="h-5 w-5 text-[var(--accent)]" />
+            </motion.span>
           </h1>
           <p className="mt-0.5 text-sm text-[var(--ink-muted)]">
             Real-time network cost attribution across{" "}
@@ -45,40 +54,53 @@ export function Topbar({ data }: { data: DashboardSummary | null }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
+          <motion.button
+            {...tapPress}
             onClick={() => showSoon("Custom date ranges — coming soon (data is cumulative-since-agent-start today)")}
             className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--ink-secondary)] shadow-[var(--card-shadow)]"
           >
             <IconCalendar className="h-3.5 w-3.5" />
             {today}
-          </button>
+          </motion.button>
           <span className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--ink-secondary)] shadow-[var(--card-shadow)]">
-            <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--accent)] opacity-60" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
+            </span>
             Live · refreshes every 15s
           </span>
-          <button
+          <motion.button
+            {...tapPress}
             onClick={() => showSoon("Dimension filters — coming soon")}
             className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--ink-secondary)] shadow-[var(--card-shadow)]"
           >
             <IconFilter className="h-3.5 w-3.5" />
             Filters
-          </button>
-          <button
+          </motion.button>
+          <motion.button
+            {...tapPress}
             onClick={downloadSnapshot}
             disabled={!data}
             title="Download this snapshot as JSON"
             className="flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1.5 text-[var(--ink-secondary)] shadow-[var(--card-shadow)] disabled:opacity-40"
           >
             <IconDownload className="h-4 w-4" />
-          </button>
+          </motion.button>
         </div>
       </div>
 
-      {soonMsg && (
-        <div className="mt-2 inline-flex items-center gap-2 rounded-lg bg-[var(--surface-sunken)] px-3 py-1.5 text-xs text-[var(--ink-secondary)]">
-          {soonMsg}
-        </div>
-      )}
+      <AnimatePresence>
+        {soonMsg && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mt-2 inline-flex items-center gap-2 rounded-lg bg-[var(--surface-sunken)] px-3 py-1.5 text-xs text-[var(--ink-secondary)]"
+          >
+            {soonMsg}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </header>
   );
 }

@@ -1,3 +1,4 @@
+import { motion } from "framer-motion";
 import {
   IconBell,
   IconBulb,
@@ -59,16 +60,21 @@ export function Sidebar({ active, onSelect }: { active: string; onSelect: (id: s
               <button
                 key={item.id}
                 onClick={() => onSelect(item.id)}
-                className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-                  isActive
-                    ? "bg-[var(--accent-wash)] font-medium text-[var(--accent)]"
-                    : "text-[var(--ink-secondary)] hover:bg-[var(--surface-sunken)]"
+                className={`relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                  isActive ? "font-medium text-[var(--accent)]" : "text-[var(--ink-secondary)] hover:bg-[var(--surface-sunken)]"
                 }`}
               >
-                <Icon className={`h-4 w-4 flex-shrink-0 ${isActive ? "text-[var(--accent)]" : "text-[var(--ink-muted)]"}`} />
-                {item.label}
+                {isActive && (
+                  <motion.span
+                    layoutId="nav-active-pill"
+                    className="absolute inset-0 rounded-lg bg-[var(--accent-wash)]"
+                    transition={{ type: "spring", stiffness: 400, damping: 32 }}
+                  />
+                )}
+                <Icon className={`relative z-10 h-4 w-4 flex-shrink-0 ${isActive ? "text-[var(--accent)]" : "text-[var(--ink-muted)]"}`} />
+                <span className="relative z-10">{item.label}</span>
                 {!item.real && (
-                  <span className="ml-auto rounded-full bg-[var(--surface-sunken)] px-1.5 py-0.5 text-[0.6rem] text-[var(--ink-muted)]">
+                  <span className="relative z-10 ml-auto rounded-full bg-[var(--surface-sunken)] px-1.5 py-0.5 text-[0.6rem] text-[var(--ink-muted)]">
                     soon
                   </span>
                 )}

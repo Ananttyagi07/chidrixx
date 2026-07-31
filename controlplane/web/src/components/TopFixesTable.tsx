@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import type { FindingRow } from "../types";
 import { PATH_CLASS_LABEL } from "../palette";
 import { formatINR } from "../format";
@@ -29,7 +30,7 @@ export function TopFixesTable({ findings }: { findings: FindingRow[] }) {
         </thead>
         <tbody>
           {findings.map((f, i) => (
-            <FixRow key={i} finding={f} />
+            <FixRow key={i} finding={f} index={i} />
           ))}
         </tbody>
       </table>
@@ -37,12 +38,17 @@ export function TopFixesTable({ findings }: { findings: FindingRow[] }) {
   );
 }
 
-function FixRow({ finding: f }: { finding: FindingRow }) {
+function FixRow({ finding: f, index }: { finding: FindingRow; index: number }) {
   const [open, setOpen] = useState(false);
 
   return (
     <>
-      <tr className="border-b border-[var(--border)] align-top">
+      <motion.tr
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: Math.min(index * 0.04, 0.4), duration: 0.25 }}
+        className="border-b border-[var(--border)] align-top transition-colors hover:bg-[var(--surface-sunken)]"
+      >
         <td className="max-w-[8rem] truncate py-2 pr-3 font-mono text-xs text-[var(--ink-secondary)]" title={f.ClusterID}>
           {f.ClusterID}
         </td>
@@ -70,16 +76,29 @@ function FixRow({ finding: f }: { finding: FindingRow }) {
             </button>
           )}
         </td>
-      </tr>
-      {open && f.fix_manifest && (
-        <tr className="border-b border-[var(--border)]">
-          <td colSpan={7} className="bg-[var(--page)] p-3">
-            <pre className="overflow-x-auto whitespace-pre rounded-md border border-[var(--border)] bg-[var(--surface)] p-3 font-mono text-xs">
-              {f.fix_manifest}
-            </pre>
-          </td>
-        </tr>
-      )}
+      </motion.tr>
+      <AnimatePresence>
+        {open && f.fix_manifest && (
+          <motion.tr
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="border-b border-[var(--border)]"
+          >
+            <td colSpan={7} className="bg-[var(--page)] p-3">
+              <motion.pre
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.25 }}
+                className="overflow-x-auto whitespace-pre rounded-md border border-[var(--border)] bg-[var(--surface)] p-3 font-mono text-xs"
+              >
+                {f.fix_manifest}
+              </motion.pre>
+            </td>
+          </motion.tr>
+        )}
+      </AnimatePresence>
     </>
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { fetchDashboardSummary } from "./api";
 import type { DashboardSummary } from "./types";
 import { StatCard, StatCardComingSoon } from "./components/StatCard";
@@ -9,8 +10,48 @@ import { TopFixesTable } from "./components/TopFixesTable";
 import { ComingSoonCard, ComingSoonPage } from "./components/ComingSoon";
 import { Sidebar, NAV_ITEMS } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
+import { AnimatedNumber, AnimatedRange } from "./components/AnimatedNumber";
 import { CATEGORICAL, PATH_CLASS_COLOR, PATH_CLASS_LABEL, STATUS } from "./palette";
+import { container, item } from "./motion";
 import { formatBytes, formatINR } from "./format";
+
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <motion.div
+      variants={item}
+      className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--card-shadow)]"
+    >
+      <div className="mb-3 text-xs font-medium uppercase tracking-wide text-[var(--ink-muted)]">{title}</div>
+      {children}
+    </motion.div>
+  );
+}
+
+function SkeletonCard({ className = "" }: { className?: string }) {
+  return (
+    <div className={`animate-pulse rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--card-shadow)] ${className}`}>
+      <div className="h-3 w-24 rounded bg-[var(--surface-sunken)]" />
+      <div className="mt-3 h-6 w-32 rounded bg-[var(--surface-sunken)]" />
+    </div>
+  );
+}
+
+function Skeleton() {
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <SkeletonCard key={i} />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <SkeletonCard className="h-40" />
+        <SkeletonCard className="h-40" />
+        <SkeletonCard className="h-40" />
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [data, setData] = useState<DashboardSummary | null>(null);
@@ -84,111 +125,120 @@ export default function App() {
   const navLabel = NAV_ITEMS.find((n) => n.id === active)?.label ?? "Overview";
 
   return (
-    <div className="flex min-h-screen bg-[var(--page)]">
+    <div className="relative flex min-h-screen overflow-hidden bg-[var(--page)]">
+      <div className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-[var(--accent)] opacity-[0.05] blur-3xl" />
+      <div className="pointer-events-none absolute right-0 top-1/3 h-72 w-72 rounded-full bg-[var(--series-blue)] opacity-[0.04] blur-3xl" />
+
       <Sidebar active={active} onSelect={setActive} />
 
-      <main className="flex-1 p-6">
+      <main className="relative z-10 flex-1 p-6">
         <Topbar data={data} />
 
-        {active !== "overview" ? (
-          <ComingSoonPage title={navLabel} />
-        ) : (
-          <>
-            {error && (
-              <div className="mb-4 rounded-xl border border-[var(--status-critical)]/40 bg-[var(--status-critical)]/10 px-4 py-3 text-sm text-[var(--status-critical)]">
-                Couldn't load dashboard data: {error}
-              </div>
-            )}
-
-            {!data && !error && <div className="text-sm text-[var(--ink-muted)]">Loading…</div>}
-
-            {data && (
-              <div className="flex flex-col gap-5">
-                <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-                  <StatCard
-                    label="Total spend"
-                    value={`${formatINR(data.summary.TotalCostLowINR)}–${formatINR(data.summary.TotalCostHighINR)}`}
-                    trend={data.trend.map((p) => p.CostHigh)}
-                  />
-                  <StatCard
-                    label="Data transferred"
-                    value={formatBytes(data.summary.TotalBytesTx + data.summary.TotalBytesRx)}
-                  />
-                  <StatCard
-                    label="Potential savings"
-                    value={formatINR(potentialSavings)}
-                    sub={data.top_fixes.length > 0 ? `${data.top_fixes.length} flagged flows` : undefined}
-                  />
-                  <StatCard label="Active workloads" value={String(data.summary.WorkloadCount)} />
-                  <StatCardComingSoon label="Carbon footprint" />
+        <AnimatePresence mode="wait">
+          {active !== "overview" ? (
+            <motion.div key="soon" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <ComingSoonPage title={navLabel} />
+            </motion.div>
+          ) : (
+            <motion.div key="overview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              {error && (
+                <div className="mb-4 rounded-xl border border-[var(--status-critical)]/40 bg-[var(--status-critical)]/10 px-4 py-3 text-sm text-[var(--status-critical)]">
+                  Couldn't load dashboard data: {error}
                 </div>
+              )}
 
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--card-shadow)]">
-                    <div className="mb-3 text-xs font-medium uppercase tracking-wide text-[var(--ink-muted)]">
-                      Spend distribution
-                    </div>
-                    <DonutChart slices={classSlices} centerLabel="total spend" />
+              {!data && !error && <Skeleton />}
+
+              {data && (
+                <motion.div variants={container} initial="hidden" animate="show" className="flex flex-col gap-5">
+                  <motion.div variants={item} className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+                    <StatCard label="Total spend" trend={data.trend.map((p) => p.CostHigh)}>
+                      <AnimatedRange
+                        low={data.summary.TotalCostLowINR}
+                        high={data.summary.TotalCostHighINR}
+                        format={(lo, hi) => `${formatINR(lo)}–${formatINR(hi)}`}
+                      />
+                    </StatCard>
+                    <StatCard label="Data transferred">
+                      <AnimatedNumber
+                        value={data.summary.TotalBytesTx + data.summary.TotalBytesRx}
+                        format={formatBytes}
+                      />
+                    </StatCard>
+                    <StatCard
+                      label="Potential savings"
+                      sub={data.top_fixes.length > 0 ? `${data.top_fixes.length} flagged flows` : undefined}
+                    >
+                      <AnimatedNumber value={potentialSavings} format={formatINR} />
+                    </StatCard>
+                    <StatCard label="Active workloads">
+                      <AnimatedNumber value={data.summary.WorkloadCount} format={(n) => String(Math.round(n))} />
+                    </StatCard>
+                    <StatCardComingSoon label="Carbon footprint" />
+                  </motion.div>
+
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                    <Panel title="Spend distribution">
+                      <DonutChart slices={classSlices} centerLabel="total spend" />
+                    </Panel>
+
+                    <ComingSoonCard
+                      title="Multi-cloud topology"
+                      note="chidrixx attributes one cluster's network paths today — a cross-cloud view needs multi-provider ingestion this doesn't have yet."
+                    />
+
+                    <ComingSoonCard
+                      title="Spend by provider"
+                      note="Single-cloud price book (AWS) today — no Azure/GCP/OCI attribution."
+                    />
                   </div>
 
-                  <ComingSoonCard
-                    title="Multi-cloud topology"
-                    note="chidrixx attributes one cluster's network paths today — a cross-cloud view needs multi-provider ingestion this doesn't have yet."
-                  />
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                    <motion.div
+                      variants={item}
+                      className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--card-shadow)] lg:col-span-2"
+                    >
+                      <div className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--ink-muted)]">
+                        Spend trend
+                      </div>
+                      <SpendTrendChart points={data.trend} />
+                    </motion.div>
 
-                  <ComingSoonCard
-                    title="Spend by provider"
-                    note="Single-cloud price book (AWS) today — no Azure/GCP/OCI attribution."
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 lg:col-span-2 shadow-[var(--card-shadow)]">
-                    <div className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--ink-muted)]">
-                      Spend trend
-                    </div>
-                    <SpendTrendChart points={data.trend} />
+                    <Panel title="Spend by confidence">
+                      <DonutChart slices={confidenceSlices} centerLabel="flagged spend" />
+                    </Panel>
                   </div>
 
-                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--card-shadow)]">
-                    <div className="mb-3 text-xs font-medium uppercase tracking-wide text-[var(--ink-muted)]">
-                      Spend by confidence
-                    </div>
-                    <DonutChart slices={confidenceSlices} centerLabel="flagged spend" />
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                    <ComingSoonCard title="Anomaly detection" note="No cross-snapshot growth comparison in the dashboard yet." />
+                    <ComingSoonCard title="Forecast (next 7 days)" note="No forecasting model exists." />
+                    <ComingSoonCard title="Budget status" note="No budget-setting feature exists." />
                   </div>
-                </div>
 
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                  <ComingSoonCard title="Anomaly detection" note="No cross-snapshot growth comparison in the dashboard yet." />
-                  <ComingSoonCard title="Forecast (next 7 days)" note="No forecasting model exists." />
-                  <ComingSoonCard title="Budget status" note="No budget-setting feature exists." />
-                </div>
-
-                <div id="clusters">
-                  <div className="mb-3 text-xs font-medium uppercase tracking-wide text-[var(--ink-muted)]">Clusters</div>
-                  {data.clusters.length === 0 ? (
-                    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] py-8 text-center text-sm text-[var(--ink-muted)] shadow-[var(--card-shadow)]">
-                      No clusters have shipped data yet.
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                      {data.clusters.map((c) => (
-                        <ClusterCard key={c.ClusterID} cluster={c} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div id="fix-opportunities" className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--card-shadow)]">
-                  <div className="mb-3 text-xs font-medium uppercase tracking-wide text-[var(--ink-muted)]">
-                    Top fix opportunities
+                  <div id="clusters">
+                    <div className="mb-3 text-xs font-medium uppercase tracking-wide text-[var(--ink-muted)]">Clusters</div>
+                    {data.clusters.length === 0 ? (
+                      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] py-8 text-center text-sm text-[var(--ink-muted)] shadow-[var(--card-shadow)]">
+                        No clusters have shipped data yet.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {data.clusters.map((c) => (
+                          <ClusterCard key={c.ClusterID} cluster={c} />
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <TopFixesTable findings={data.top_fixes} />
-                </div>
-              </div>
-            )}
-          </>
-        )}
+
+                  <Panel title="Top fix opportunities">
+                    <div id="fix-opportunities" />
+                    <TopFixesTable findings={data.top_fixes} />
+                  </Panel>
+                </motion.div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
     </div>
   );

@@ -1,5 +1,7 @@
+import { motion } from "framer-motion";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { formatINR } from "../format";
+import { AnimatedNumber } from "./AnimatedNumber";
 
 export interface DonutSlice {
   key: string;
@@ -33,6 +35,9 @@ export function DonutChart({ slices, centerLabel }: { slices: DonutSlice[]; cent
               paddingAngle={2}
               stroke="var(--surface)"
               strokeWidth={2}
+              isAnimationActive
+              animationDuration={800}
+              animationEasing="ease-out"
             >
               {nonZero.map((s) => (
                 <Cell key={s.key} fill={s.color} />
@@ -50,13 +55,19 @@ export function DonutChart({ slices, centerLabel }: { slices: DonutSlice[]; cent
           </PieChart>
         </ResponsiveContainer>
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <div className="text-base font-semibold tabular-nums">{formatINR(total)}</div>
+          <AnimatedNumber value={total} format={formatINR} className="text-base font-semibold tabular-nums" />
           <div className="text-[0.65rem] text-[var(--ink-muted)]">{centerLabel}</div>
         </div>
       </div>
       <div className="flex flex-1 flex-col gap-1.5">
-        {slices.map((s) => (
-          <div key={s.key} className="flex items-center justify-between gap-2 text-xs">
+        {slices.map((s, i) => (
+          <motion.div
+            key={s.key}
+            initial={{ opacity: 0, x: 8 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: i * 0.05, duration: 0.3 }}
+            className="flex items-center justify-between gap-2 text-xs"
+          >
             <span className="flex items-center gap-1.5 text-[var(--ink-secondary)]">
               <span className="inline-block h-2 w-2 rounded-full" style={{ background: s.color }} />
               {s.label}
@@ -64,7 +75,7 @@ export function DonutChart({ slices, centerLabel }: { slices: DonutSlice[]; cent
             <span className="font-mono tabular-nums text-[var(--ink)]">
               {total > 0 ? ((s.value / total) * 100).toFixed(1) : "0.0"}%
             </span>
-          </div>
+          </motion.div>
         ))}
       </div>
     </div>
