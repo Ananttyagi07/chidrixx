@@ -237,3 +237,30 @@ want to change: `-pricebook`, `-managed-cidrs`, `-node-has-public-ip`
   ship pipeline with the freshly-generated token end-to-end (real findings
   visible through the control plane's API) to confirm it actually works,
   not just renders.
+- **Fix engine beyond a static sentence**: the "fix" a Finding carried used
+  to be one of five fixed strings keyed only by path class
+  ([agent/cmd/kharcha/report.go](agent/cmd/kharcha/report.go)'s
+  `fixHints`) — never anything specific to the actual flow. Added
+  [agent/cmd/kharcha/fixengine.go](agent/cmd/kharcha/fixengine.go), which
+  mechanically generates a real, copy-pasteable `NetworkPolicy` manifest
+  for `INTERNET_EGRESS`/`NAT_EGRESS`/`CROSS_REGION` findings, scoped to the
+  source pod's actual namespace and the actual flagged destination
+  IP/CIDR — an allow-all-except-this-destination policy, since
+  NetworkPolicies are allow-lists and surgically blocking one wasteful
+  destination needs the inverse of a bare deny rule.
+  `CROSS_AZ`/`MANAGED_SERVICE`'s real fix (co-locating workloads by label)
+  depends on pod labels this agent doesn't resolve — fabricating a label
+  selector that might not match the real Deployment would be worse than
+  the plain-text hint those classes keep instead.
+
+  Getting this to actually reach a viewer surfaced two more wiring gaps,
+  both fixed and verified: the control plane's own `Finding` model and
+  SQLite schema didn't carry a manifest field at all (fixed with a
+  `fix_manifest` column and a real migration path — tested against an
+  actual pre-existing database file with the old schema, not just an
+  in-memory one), and `shipper.go` had its own hand-maintained wire struct
+  that silently dropped the new field (fixed, with the contract test
+  updated to catch this class of drift in future). End-to-end proof: a
+  real pod curling `1.1.1.1` produced a real `NetworkPolicy` named
+  `deny-1-1-1-1` scoped to `namespace: default`, visible through both the
+  control plane's API and its dashboard.

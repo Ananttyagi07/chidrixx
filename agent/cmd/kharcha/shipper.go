@@ -24,6 +24,7 @@ type shipperFinding struct {
 	CostLowINR  float64 `json:"cost_low_inr"`
 	CostHighINR float64 `json:"cost_high_inr"`
 	FixHint     string  `json:"fix_hint"`
+	FixManifest string  `json:"fix_manifest"`
 }
 
 type shipperRequest struct {
@@ -73,6 +74,7 @@ func (s *Shipper) Ship(ctx context.Context, findings []*Finding) error {
 			CostLowINR:  f.CostLowINR,
 			CostHighINR: f.CostHighINR,
 			FixHint:     f.FixHint,
+			FixManifest: f.FixManifest,
 		})
 	}
 

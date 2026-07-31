@@ -42,14 +42,28 @@ type Finding struct {
 
 	Backends []BackendFinding
 
-	Class      PathClass
-	Confidence string
-	FixHint    string
+	Class       PathClass
+	Confidence  string
+	FixHint     string
+	FixManifest string
 
 	BytesTx     uint64
 	BytesRx     uint64
 	CostLowINR  float64
 	CostHighINR float64
+}
+
+// indentManifest prefixes each line of a YAML manifest for CLI display so
+// it reads as a nested block rather than running flush against the
+// left margin like the rest of the report.
+func indentManifest(manifest string) string {
+	lines := strings.Split(strings.TrimRight(manifest, "\n"), "\n")
+
+	for i, line := range lines {
+		lines[i] = "  " + line
+	}
+
+	return strings.Join(lines, "\n") + "\n"
 }
 
 // fixHints maps a wasteful PathClass to the concrete remediation the build
@@ -165,12 +179,14 @@ func (a *Aggregate) Add(
 	sourcePod := ""
 	sourceIP := ""
 	sourceNode := ""
+	sourceNamespace := ""
 	container := ""
 
 	if identity.Kubernetes != nil {
 		sourcePod = identity.Kubernetes.Pod
 		sourceIP = identity.Kubernetes.PodIP
 		sourceNode = identity.Kubernetes.Node
+		sourceNamespace = identity.Kubernetes.Namespace
 		container = identity.Kubernetes.Container
 	}
 
@@ -317,9 +333,10 @@ func (a *Aggregate) Add(
 
 			Backends: backends,
 
-			Class:      class,
-			Confidence: confidence,
-			FixHint:    fixHints[class],
+			Class:       class,
+			Confidence:  confidence,
+			FixHint:     fixHints[class],
+			FixManifest: generateFixManifest(class, sourceNamespace, remoteIP),
 		}
 
 		a.byKey[key] = f
@@ -347,6 +364,7 @@ func (a *Aggregate) Add(
 		f.Class = class
 		f.Confidence = confidence
 		f.FixHint = fixHints[class]
+		f.FixManifest = generateFixManifest(class, sourceNamespace, remoteIP)
 	}
 
 	f.BytesTx += tx
@@ -526,6 +544,10 @@ func (a *Aggregate) PrintTop(n int) {
 
 		if f.FixHint != "" {
 			fmt.Printf("FIX         : %s\n", f.FixHint)
+		}
+
+		if f.FixManifest != "" {
+			fmt.Printf("FIX MANIFEST:\n%s", indentManifest(f.FixManifest))
 		}
 	}
 

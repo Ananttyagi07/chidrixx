@@ -36,7 +36,8 @@ func TestShipperWireFormatMatchesControlPlaneContract(t *testing.T) {
 			Class: PathInternetEgress, Confidence: ConfHigh,
 			BytesTx: 100, BytesRx: 200,
 			CostLowINR: 1.5, CostHighINR: 2.5,
-			FixHint: "cache or compress it",
+			FixHint:     "cache or compress it",
+			FixManifest: "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\n",
 		},
 	}
 
@@ -59,7 +60,8 @@ func TestShipperWireFormatMatchesControlPlaneContract(t *testing.T) {
 		"path_class": "INTERNET_EGRESS", "confidence": "high",
 		"bytes_tx": float64(100), "bytes_rx": float64(200),
 		"cost_low_inr": 1.5, "cost_high_inr": 2.5,
-		"fix_hint": "cache or compress it",
+		"fix_hint":     "cache or compress it",
+		"fix_manifest": "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\n",
 	} {
 		if f[key] != want {
 			t.Errorf("field %s = %v, want %v", key, f[key], want)

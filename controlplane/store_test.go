@@ -2,8 +2,12 @@
 package main
 
 import (
+	"database/sql"
+	"path/filepath"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 func testStore(t *testing.T) *Store {
@@ -41,6 +45,86 @@ func TestIngestAndClusters(t *testing.T) {
 	}
 	if clusters[0].CostHighINR != 2 {
 		t.Fatalf("expected total high cost 2, got %v", clusters[0].CostHighINR)
+	}
+}
+
+func TestFixManifestRoundTrips(t *testing.T) {
+	s := testStore(t)
+
+	manifest := "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\n"
+
+	if err := s.Ingest("cluster-a", []Finding{
+		{Source: "ns/app", Destination: "8.8.8.8", PathClass: "INTERNET_EGRESS", Confidence: "high",
+			FixHint: "confirm this needs to leave", FixManifest: manifest},
+	}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	findings, err := s.LatestFindings(10)
+	if err != nil {
+		t.Fatalf("LatestFindings: %v", err)
+	}
+
+	if len(findings) != 1 || findings[0].FixManifest != manifest {
+		t.Fatalf("expected FixManifest to round-trip through ingest+read, got: %+v", findings)
+	}
+}
+
+// TestOpenStoreMigratesExistingDatabaseWithoutFixManifestColumn guards the
+// real gap that would otherwise bite anyone with a control plane already
+// deployed before this column existed: CREATE TABLE IF NOT EXISTS is a
+// no-op against a database that already has the table, so a fresh
+// in-memory test can't catch a broken migration -- it needs a database
+// file that was genuinely created with the old schema.
+func TestOpenStoreMigratesExistingDatabaseWithoutFixManifestColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open pre-migration db: %v", err)
+	}
+
+	const oldSchema = `
+CREATE TABLE flow_aggregate (
+	id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+	cluster_id               TEXT NOT NULL,
+	reported_at              INTEGER NOT NULL,
+	src_workload             TEXT NOT NULL,
+	dst_workload_or_endpoint TEXT NOT NULL,
+	path_class               TEXT NOT NULL,
+	confidence               TEXT NOT NULL,
+	bytes_tx                 INTEGER NOT NULL,
+	bytes_rx                 INTEGER NOT NULL,
+	cost_low_inr             REAL NOT NULL,
+	cost_high_inr            REAL NOT NULL,
+	fix_hint                 TEXT
+);`
+	if _, err := db.Exec(oldSchema); err != nil {
+		t.Fatalf("create old schema: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close pre-migration db: %v", err)
+	}
+
+	s, err := OpenStore(path)
+	if err != nil {
+		t.Fatalf("OpenStore against pre-existing old-schema database: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	if err := s.Ingest("cluster-a", []Finding{
+		{Source: "ns/app", Destination: "8.8.8.8", PathClass: "INTERNET_EGRESS", Confidence: "high", FixManifest: "some-manifest"},
+	}); err != nil {
+		t.Fatalf("Ingest against migrated database: %v", err)
+	}
+
+	findings, err := s.LatestFindings(10)
+	if err != nil {
+		t.Fatalf("LatestFindings against migrated database: %v", err)
+	}
+
+	if len(findings) != 1 || findings[0].FixManifest != "some-manifest" {
+		t.Fatalf("expected fix_manifest column to work after migration, got: %+v", findings)
 	}
 }
 

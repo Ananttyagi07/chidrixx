@@ -4,6 +4,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -40,13 +41,26 @@ CREATE TABLE IF NOT EXISTS flow_aggregate (
 	bytes_rx                 INTEGER NOT NULL,
 	cost_low_inr             REAL NOT NULL,
 	cost_high_inr            REAL NOT NULL,
-	fix_hint                 TEXT
+	fix_hint                 TEXT,
+	fix_manifest             TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_flow_aggregate_cluster_time ON flow_aggregate(cluster_id, reported_at);
 `
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("create schema: %w", err)
+	}
+
+	// fix_manifest was added after this table's original release;
+	// CREATE TABLE IF NOT EXISTS above is a no-op against a database that
+	// already has the table without it, so add the column explicitly for
+	// databases created before this change. SQLite has no
+	// "ADD COLUMN IF NOT EXISTS," so ignore the one error that means it's
+	// already there.
+	if _, err := db.Exec(`ALTER TABLE flow_aggregate ADD COLUMN fix_manifest TEXT`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		db.Close()
+		return nil, fmt.Errorf("migrate fix_manifest column: %w", err)
 	}
 
 	return &Store{db: db}, nil
@@ -69,8 +83,8 @@ func (s *Store) Ingest(clusterID string, findings []Finding) error {
 	stmt, err := tx.Prepare(`
 		INSERT INTO flow_aggregate
 			(cluster_id, reported_at, src_workload, dst_workload_or_endpoint,
-			 path_class, confidence, bytes_tx, bytes_rx, cost_low_inr, cost_high_inr, fix_hint)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 path_class, confidence, bytes_tx, bytes_rx, cost_low_inr, cost_high_inr, fix_hint, fix_manifest)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		tx.Rollback()
@@ -82,7 +96,7 @@ func (s *Store) Ingest(clusterID string, findings []Finding) error {
 		if _, err := stmt.Exec(
 			clusterID, reportedAt, f.Source, f.Destination,
 			f.PathClass, f.Confidence, f.BytesTx, f.BytesRx,
-			f.CostLowINR, f.CostHighINR, f.FixHint,
+			f.CostLowINR, f.CostHighINR, f.FixHint, f.FixManifest,
 		); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("insert finding: %w", err)
@@ -154,7 +168,7 @@ func (s *Store) LatestFindings(limit int) ([]FindingRow, error) {
 		)
 		SELECT fa.cluster_id, fa.reported_at, fa.src_workload, fa.dst_workload_or_endpoint,
 		       fa.path_class, fa.confidence, fa.bytes_tx, fa.bytes_rx,
-		       fa.cost_low_inr, fa.cost_high_inr, fa.fix_hint
+		       fa.cost_low_inr, fa.cost_high_inr, fa.fix_hint, fa.fix_manifest
 		FROM flow_aggregate fa
 		JOIN latest l ON fa.cluster_id = l.cluster_id AND fa.reported_at = l.max_time
 		ORDER BY fa.cost_high_inr DESC
@@ -169,18 +183,19 @@ func (s *Store) LatestFindings(limit int) ([]FindingRow, error) {
 	for rows.Next() {
 		var r FindingRow
 		var reportedAt int64
-		var fixHint sql.NullString
+		var fixHint, fixManifest sql.NullString
 
 		if err := rows.Scan(
 			&r.ClusterID, &reportedAt, &r.Source, &r.Destination,
 			&r.PathClass, &r.Confidence, &r.BytesTx, &r.BytesRx,
-			&r.CostLowINR, &r.CostHighINR, &fixHint,
+			&r.CostLowINR, &r.CostHighINR, &fixHint, &fixManifest,
 		); err != nil {
 			return nil, fmt.Errorf("scan finding row: %w", err)
 		}
 
 		r.ReportedAt = time.Unix(reportedAt, 0)
 		r.FixHint = fixHint.String
+		r.FixManifest = fixManifest.String
 		out = append(out, r)
 	}
 

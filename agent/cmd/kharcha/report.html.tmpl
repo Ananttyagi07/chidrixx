@@ -17,6 +17,9 @@
   .conf-med  { color: #9a6700; }
   .conf-low  { color: #b91c1c; }
   .fix { color: #444; font-size: 0.8rem; max-width: 22rem; }
+  .fix details { margin-top: 0.35rem; }
+  .fix summary { cursor: pointer; color: #0969da; }
+  .fix .manifest { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 0.5rem; font-size: 0.75rem; overflow-x: auto; white-space: pre; }
   .footer { color: #666; font-size: 0.8rem; margin-top: 1.5rem; }
 </style>
 </head>
@@ -52,7 +55,15 @@
         <td class="num">{{$f.BytesTx}}</td>
         <td class="num">{{$f.BytesRx}}</td>
         <td class="num">&#8377;{{printf "%.4f" $f.CostLowINR}}&ndash;{{printf "%.4f" $f.CostHighINR}}</td>
-        <td class="fix">{{$f.FixHint}}</td>
+        <td class="fix">
+          {{$f.FixHint}}
+          {{if $f.FixManifest}}
+          <details>
+            <summary>NetworkPolicy manifest</summary>
+            <pre class="manifest">{{$f.FixManifest}}</pre>
+          </details>
+          {{end}}
+        </td>
       </tr>
       {{end}}
     </tbody>

@@ -68,6 +68,10 @@ const dashboardTemplateSrc = `<!doctype html>
   tbody tr:hover { background: color-mix(in srgb, var(--wire) 6%, transparent); }
   .mono { font-family: var(--font-mono); font-size: 0.8rem; }
   .truncate { max-width: 14rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fix { max-width: 20rem; font-size: 0.82rem; color: var(--muted); }
+  .fix details { margin-top: 0.35rem; }
+  .fix summary { cursor: pointer; color: var(--wire); font-size: 0.8rem; }
+  .fix .manifest { background: var(--ink); border: 1px solid var(--ink-border); border-radius: 0.4rem; padding: 0.5rem; font-family: var(--font-mono); font-size: 0.72rem; overflow-x: auto; white-space: pre; color: var(--text); }
   .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .cost { color: var(--rupee); font-weight: 600; }
   .chip { font-family: var(--font-mono); font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 999px; white-space: nowrap; border: 1px solid transparent; }
@@ -133,6 +137,7 @@ const dashboardTemplateSrc = `<!doctype html>
                 <th>Destination</th>
                 <th>Class</th>
                 <th class="num">Cost (INR)</th>
+                <th>Fix</th>
               </tr>
             </thead>
             <tbody>
@@ -143,10 +148,19 @@ const dashboardTemplateSrc = `<!doctype html>
                 <td class="mono truncate" title="{{.Destination}}">{{.Destination}}</td>
                 <td><span class="chip chip-{{.Tone}}">{{.PathClass}}</span></td>
                 <td class="num mono cost">&#8377;{{printf "%.4f" .CostLowINR}}&ndash;{{printf "%.4f" .CostHighINR}}</td>
+                <td class="fix">
+                  {{.FixHint}}
+                  {{if .FixManifest}}
+                  <details>
+                    <summary>NetworkPolicy manifest</summary>
+                    <pre class="manifest">{{.FixManifest}}</pre>
+                  </details>
+                  {{end}}
+                </td>
               </tr>
               {{end}}
               {{if not .Findings}}
-              <tr><td colspan="5" class="empty">No findings yet.</td></tr>
+              <tr><td colspan="6" class="empty">No findings yet.</td></tr>
               {{end}}
             </tbody>
           </table>
