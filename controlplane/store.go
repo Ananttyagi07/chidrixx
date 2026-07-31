@@ -202,6 +202,128 @@ func (s *Store) LatestFindings(limit int) ([]FindingRow, error) {
 	return out, rows.Err()
 }
 
+// Summary is the aggregate, cross-cluster headline state — every number
+// here is a real sum/count over the latest snapshot per cluster, nothing
+// modeled or estimated beyond what CostINR already prices.
+type Summary struct {
+	ClusterCount     int
+	WorkloadCount    int
+	FindingCount     int
+	TotalBytesTx     uint64
+	TotalBytesRx     uint64
+	TotalCostLowINR  float64
+	TotalCostHighINR float64
+}
+
+// Summary aggregates the current (latest-per-cluster) state into the
+// headline numbers a dashboard's stat row needs.
+func (s *Store) Summary() (Summary, error) {
+	var out Summary
+
+	row := s.db.QueryRow(`
+		WITH latest AS (
+			SELECT cluster_id, MAX(reported_at) AS max_time
+			FROM flow_aggregate
+			GROUP BY cluster_id
+		)
+		SELECT
+			COUNT(DISTINCT fa.cluster_id),
+			COUNT(DISTINCT fa.src_workload),
+			COUNT(*),
+			COALESCE(SUM(fa.bytes_tx), 0),
+			COALESCE(SUM(fa.bytes_rx), 0),
+			COALESCE(SUM(fa.cost_low_inr), 0),
+			COALESCE(SUM(fa.cost_high_inr), 0)
+		FROM flow_aggregate fa
+		JOIN latest l ON fa.cluster_id = l.cluster_id AND fa.reported_at = l.max_time
+	`)
+
+	if err := row.Scan(
+		&out.ClusterCount, &out.WorkloadCount, &out.FindingCount,
+		&out.TotalBytesTx, &out.TotalBytesRx,
+		&out.TotalCostLowINR, &out.TotalCostHighINR,
+	); err != nil {
+		return Summary{}, fmt.Errorf("query summary: %w", err)
+	}
+
+	return out, nil
+}
+
+// ClassSpend is the total cost attributed to one path class, across the
+// latest snapshot per cluster.
+type ClassSpend struct {
+	PathClass    string
+	CostHighINR  float64
+	FindingCount int
+}
+
+// SpendByClass groups the current state by path class, highest cost
+// first — the real data behind a "spend by category" breakdown.
+func (s *Store) SpendByClass() ([]ClassSpend, error) {
+	rows, err := s.db.Query(`
+		WITH latest AS (
+			SELECT cluster_id, MAX(reported_at) AS max_time
+			FROM flow_aggregate
+			GROUP BY cluster_id
+		)
+		SELECT fa.path_class, COALESCE(SUM(fa.cost_high_inr), 0), COUNT(*)
+		FROM flow_aggregate fa
+		JOIN latest l ON fa.cluster_id = l.cluster_id AND fa.reported_at = l.max_time
+		GROUP BY fa.path_class
+		ORDER BY SUM(fa.cost_high_inr) DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query spend by class: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ClassSpend
+	for rows.Next() {
+		var c ClassSpend
+		if err := rows.Scan(&c.PathClass, &c.CostHighINR, &c.FindingCount); err != nil {
+			return nil, fmt.Errorf("scan class spend: %w", err)
+		}
+		out = append(out, c)
+	}
+
+	return out, rows.Err()
+}
+
+// GlobalTrend sums cost across every cluster at each reported_at, oldest
+// first. Snapshots across independently-scheduled agents won't align
+// perfectly, so this is a real but approximate combined trend — accurate
+// per-cluster trends are what CostTrend is for.
+func (s *Store) GlobalTrend(maxPoints int) ([]CostTrendPoint, error) {
+	rows, err := s.db.Query(`
+		SELECT reported_at, SUM(cost_high_inr)
+		FROM flow_aggregate
+		GROUP BY reported_at
+		ORDER BY reported_at DESC
+		LIMIT ?
+	`, maxPoints)
+	if err != nil {
+		return nil, fmt.Errorf("query global trend: %w", err)
+	}
+	defer rows.Close()
+
+	var out []CostTrendPoint
+	for rows.Next() {
+		var p CostTrendPoint
+		var reportedAt int64
+		if err := rows.Scan(&reportedAt, &p.CostHigh); err != nil {
+			return nil, fmt.Errorf("scan global trend point: %w", err)
+		}
+		p.ReportedAt = time.Unix(reportedAt, 0)
+		out = append(out, p)
+	}
+
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+
+	return out, rows.Err()
+}
+
 // CostTrendPoint is one snapshot's total cost for a cluster, for a
 // sparkline.
 type CostTrendPoint struct {

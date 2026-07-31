@@ -29,7 +29,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/ingest", handleIngest(store))
 	mux.HandleFunc("/api/v1/findings", handleFindingsAPI(store))
-	mux.HandleFunc("/", handleDashboard(store))
+	mux.HandleFunc("/api/v1/dashboard-summary", handleDashboardSummary(store))
+	mux.Handle("/", webAssetsHandler())
 
 	log.Printf("chidrixx control plane listening on %s (store: %s)", *addr, *dbPath)
 	log.Fatal(http.ListenAndServe(*addr, requireToken(token, mux)))

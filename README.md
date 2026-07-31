@@ -83,6 +83,30 @@ helm upgrade kharcha deploy/helm/kharcha -n kharcha \
   --set controlPlane.clusterID=<a-name-for-this-cluster>
 ```
 
+The control plane serves a real dashboard at `/` — a React/Tailwind/Recharts
+SPA ([controlplane/web](controlplane/web)) built against
+[controlplane/summary_api.go](controlplane/summary_api.go)'s
+`/api/v1/dashboard-summary`: total spend, data transferred, active
+workloads, spend-by-path-class, a combined spend trend, per-cluster cards
+with sparklines, and the top flagged flows with their generated
+NetworkPolicy manifests. Every number on it is a real aggregate over
+ingested data — no forecasting, no multi-cloud breakdown, no invented
+"efficiency score," since chidrixx doesn't compute any of those.
+
+The built assets (`controlplane/web/dist`) are committed to git and
+embedded into the Go binary via `go:embed`, the same way
+`bpf/flow_cgroup.o` is committed for the agent — `go build`/`go test`
+work out of the box without Node installed. After changing anything under
+`controlplane/web/src`, rebuild and re-commit the output:
+
+```bash
+cd controlplane/web && npm install && npm run build
+```
+
+For frontend-only iteration, `npm run dev` proxies API calls to a
+locally running control plane (`go run . -addr=:8090` from
+`controlplane/`).
+
 By default the control plane is unauthenticated — fine for a quick local
 trial, not for anything reachable beyond a trusted network. Set a shared
 token on both sides via `CHIDRIXX_AUTH_TOKEN` (control plane) and the
