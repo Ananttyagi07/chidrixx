@@ -214,3 +214,14 @@ want to change: `-pricebook`, `-managed-cidrs`, `-node-has-public-ip`
   cluster's agent attached its `cgroup_skb` programs with no special
   handling. Torn down afterward — this was a proof, not a permanent
   fixture.
+- **Control-plane Ingress/TLS**: added an optional `ingress.*` block to
+  [deploy/helm/controlplane](deploy/helm/controlplane) (disabled by
+  default, since the Service being ClusterIP-only was flagged as a real
+  gap — Basic Auth over plain HTTP is fine inside a cluster, not for
+  exposing it beyond one). `helm upgrade`d the live control plane with it
+  enabled and confirmed real routing: a request with the right `Host`
+  header and Basic Auth credentials through Traefik got `200`; this also
+  surfaced and fixed a self-inflicted issue where the GHCR image-reference
+  change above (still private) had silently made the *next* upgrade of
+  this same release try to pull the private image — fixed by pinning
+  `image.repository`/`image.tag` explicitly until the packages go public.

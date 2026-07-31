@@ -27,3 +27,20 @@ auth:
   tokenSecretKey: "token"
 
 resources: {}
+
+# Expose the dashboard/API outside the cluster. Basic Auth over plain HTTP
+# is fine on a trusted internal network (see auth.tokenSecretName above)
+# but not over the open internet — set tls.enabled with a cert-manager
+# annotation (or a pre-existing secretName) so credentials aren't sent in
+# the clear.
+ingress:
+  enabled: false
+  className: "traefik"
+  host: ""
+  annotations: {}
+  tls:
+    enabled: false
+    # Name of a pre-existing TLS secret, or the name cert-manager should
+    # write to if annotations request a certificate (e.g.
+    # cert-manager.io/cluster-issuer: letsencrypt-prod).
+    secretName: ""
