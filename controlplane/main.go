@@ -26,12 +26,21 @@ func main() {
 	}
 	defer store.Close()
 
+	// The static SPA shell carries no secrets (no data is embedded at
+	// build time — everything real is fetched from the API below), so it
+	// serves publicly. This lets the app show its own landing screen
+	// before the browser's Basic Auth prompt ever fires, instead of
+	// blocking on a credential dialog before anything renders. The actual
+	// data endpoints stay behind requireToken.
+	api := http.NewServeMux()
+	api.HandleFunc("/api/v1/ingest", handleIngest(store))
+	api.HandleFunc("/api/v1/findings", handleFindingsAPI(store))
+	api.HandleFunc("/api/v1/dashboard-summary", handleDashboardSummary(store))
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/ingest", handleIngest(store))
-	mux.HandleFunc("/api/v1/findings", handleFindingsAPI(store))
-	mux.HandleFunc("/api/v1/dashboard-summary", handleDashboardSummary(store))
+	mux.Handle("/api/", requireToken(token, api))
 	mux.Handle("/", webAssetsHandler())
 
 	log.Printf("chidrixx control plane listening on %s (store: %s)", *addr, *dbPath)
-	log.Fatal(http.ListenAndServe(*addr, requireToken(token, mux)))
+	log.Fatal(http.ListenAndServe(*addr, mux))
 }

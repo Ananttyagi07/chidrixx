@@ -135,7 +135,7 @@ func (s *Store) Clusters() ([]ClusterSummary, error) {
 	}
 	defer rows.Close()
 
-	var out []ClusterSummary
+	out := make([]ClusterSummary, 0)
 	for rows.Next() {
 		var c ClusterSummary
 		var lastSeen int64
@@ -179,7 +179,7 @@ func (s *Store) LatestFindings(limit int) ([]FindingRow, error) {
 	}
 	defer rows.Close()
 
-	var out []FindingRow
+	out := make([]FindingRow, 0)
 	for rows.Next() {
 		var r FindingRow
 		var reportedAt int64
@@ -277,7 +277,7 @@ func (s *Store) SpendByClass() ([]ClassSpend, error) {
 	}
 	defer rows.Close()
 
-	var out []ClassSpend
+	out := make([]ClassSpend, 0)
 	for rows.Next() {
 		var c ClassSpend
 		if err := rows.Scan(&c.PathClass, &c.CostHighINR, &c.FindingCount); err != nil {
@@ -306,7 +306,7 @@ func (s *Store) GlobalTrend(maxPoints int) ([]CostTrendPoint, error) {
 	}
 	defer rows.Close()
 
-	var out []CostTrendPoint
+	out := make([]CostTrendPoint, 0)
 	for rows.Next() {
 		var p CostTrendPoint
 		var reportedAt int64
@@ -347,7 +347,7 @@ func (s *Store) CostTrend(clusterID string, maxPoints int) ([]CostTrendPoint, er
 	}
 	defer rows.Close()
 
-	var out []CostTrendPoint
+	out := make([]CostTrendPoint, 0)
 	for rows.Next() {
 		var p CostTrendPoint
 		var reportedAt int64

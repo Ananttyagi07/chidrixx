@@ -1,4 +1,6 @@
+import { type ComponentType } from "react";
 import { motion } from "framer-motion";
+import DecryptedTextRaw from "./DecryptedText";
 import {
   IconBell,
   IconBulb,
@@ -12,6 +14,8 @@ import {
   IconTrendingUp,
   IconWallet,
 } from "../icons";
+
+const DecryptedText = DecryptedTextRaw as ComponentType<any>;
 
 export interface NavItem {
   id: string;
@@ -47,7 +51,16 @@ export function Sidebar({ active, onSelect }: { active: string; onSelect: (id: s
             </svg>
           </div>
           <div>
-            <div className="font-mono text-base font-semibold leading-tight tracking-tight">chidrixx</div>
+            <div className="font-mono text-base font-semibold leading-tight tracking-tight">
+              <DecryptedText
+                text="chidrixx"
+                animateOn="view"
+                sequential
+                speed={35}
+                className="text-[var(--ink)]"
+                encryptedClassName="text-[var(--ink-muted)]"
+              />
+            </div>
             <div className="text-[0.68rem] leading-tight text-[var(--ink-muted)]">Network cost attribution</div>
           </div>
         </div>

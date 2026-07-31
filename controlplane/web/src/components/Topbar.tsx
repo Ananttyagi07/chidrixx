@@ -1,6 +1,9 @@
-import { useState } from "react";
+import { useState, type ComponentType } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import DecryptedTextRaw from "./DecryptedText";
 import { IconCalendar, IconDownload, IconFilter, IconSun } from "../icons";
+
+const DecryptedText = DecryptedTextRaw as ComponentType<any>;
 import type { DashboardSummary } from "../types";
 
 function greeting(): string {
@@ -38,7 +41,14 @@ export function Topbar({ data }: { data: DashboardSummary | null }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold">
-            {greeting()}
+            <DecryptedText
+              text={greeting()}
+              animateOn="view"
+              sequential
+              speed={28}
+              className="text-[var(--ink)]"
+              encryptedClassName="text-[var(--ink-muted)]"
+            />
             <motion.span
               animate={{ rotate: 360 }}
               transition={{ duration: 16, repeat: Infinity, ease: "linear" }}

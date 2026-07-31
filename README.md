@@ -117,6 +117,13 @@ Basic Auth, not Bearer, deliberately: it's the one mechanism that works
 naturally for both an agent posting JSON and a human viewing the
 dashboard in a plain browser.
 
+The static dashboard shell itself (`GET /`, its JS/CSS) is served
+**without** auth — it carries no secrets, everything real is fetched from
+`/api/v1/*` at runtime, and this lets the app show its own landing screen
+before the browser's native Basic Auth dialog ever fires. Only `/api/*` is
+behind `requireToken`; the first authenticated fetch is what actually
+triggers the credential prompt.
+
 ### Known limitation: cgroup namespaces
 
 The agent needs to attach `cgroup_skb` programs at the node's cgroup v2
@@ -288,3 +295,34 @@ want to change: `-pricebook`, `-managed-cidrs`, `-node-has-public-ip`
   real pod curling `1.1.1.1` produced a real `NetworkPolicy` named
   `deny-1-1-1-1` scoped to `namespace: default`, visible through both the
   control plane's API and its dashboard.
+- **Light theme + a landing page, via `shadcn`/react-bits**: the dashboard's
+  default is now an enforced light theme (no more following the OS's
+  `prefers-color-scheme`), with real react-bits components
+  (`DecryptedText`, `ScrollFloat`, `RotatingText`, `VariableProximity`)
+  installed through the actual `npx shadcn@latest add @react-bits/...`
+  CLI — Node 18 can't run it (needs 20+), so a portable Node 20 was used
+  just to run the installer once; the checked-in output needs nothing
+  beyond what was already required. A new pre-auth landing page
+  (`controlplane/web/src/components/LandingPage.tsx`) lists only real
+  features (path classification, the fix engine, multi-cluster
+  aggregation) — nothing the mockup showed that chidrixx can't do. This
+  required actually splitting the server's routing
+  ([controlplane/main.go](controlplane/main.go)): the static SPA shell now
+  serves without auth (it carries no secrets) so the landing page can
+  render before any credential prompt; only `/api/*` stays behind
+  `requireToken`.
+
+  Verified for real, not just visually: a scripted Playwright click-through
+  (landing → "View live dashboard" → scroll) caught two real bugs before
+  they shipped. First, a fresh install with zero ingests ever received
+  crashed the dashboard outright — Go's nil-slice-marshals-to-`null`
+  behavior meant `trend`/`spend_by_class`/etc. serialized as JSON `null`
+  instead of `[]`, and the frontend called `.map()` on them unguarded;
+  fixed at the source (`store.go`, `make([]T, 0)` instead of `var out []T`)
+  with a regression test (`TestHandleDashboardSummaryEmptyStateHasNoNullArrays`)
+  rather than patched over client-side. Second, `ScrollFloat`'s section-title
+  reveal animation went permanently invisible for anything below the first
+  viewport — GSAP's `ScrollTrigger` defaults to tracking `window` scroll,
+  but the dashboard actually scrolls inside `main` (`overflow-y-auto`), so
+  window-scroll events never fired; fixed by threading the real scroll
+  container ref through every `SectionTitle` usage.

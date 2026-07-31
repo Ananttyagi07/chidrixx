@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useScroll, useTransform } from "framer-motion";
 import { fetchDashboardSummary } from "./api";
 import type { DashboardSummary } from "./types";
 import { StatCard, StatCardComingSoon } from "./components/StatCard";
@@ -10,18 +10,30 @@ import { TopFixesTable } from "./components/TopFixesTable";
 import { ComingSoonCard, ComingSoonPage } from "./components/ComingSoon";
 import { Sidebar, NAV_ITEMS } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
+import { LandingPage } from "./components/LandingPage";
+import { SectionTitle } from "./components/SectionTitle";
 import { AnimatedNumber, AnimatedRange } from "./components/AnimatedNumber";
 import { CATEGORICAL, PATH_CLASS_COLOR, PATH_CLASS_LABEL, STATUS } from "./palette";
 import { container, item } from "./motion";
 import { formatBytes, formatINR } from "./format";
 
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+function Panel({
+  title,
+  children,
+  scrollContainerRef,
+}: {
+  title: string;
+  children: React.ReactNode;
+  scrollContainerRef: React.RefObject<HTMLElement>;
+}) {
   return (
     <motion.div
       variants={item}
       className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--card-shadow)]"
     >
-      <div className="mb-3 text-xs font-medium uppercase tracking-wide text-[var(--ink-muted)]">{title}</div>
+      <div className="mb-3">
+        <SectionTitle scrollContainerRef={scrollContainerRef}>{title}</SectionTitle>
+      </div>
       {children}
     </motion.div>
   );
@@ -53,10 +65,14 @@ function Skeleton() {
   );
 }
 
-export default function App() {
+function Dashboard() {
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState("overview");
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const { scrollYProgress } = useScroll({ container: scrollRef });
+  const orb1Y = useTransform(scrollYProgress, [0, 1], [0, 220]);
+  const orb2Y = useTransform(scrollYProgress, [0, 1], [0, -160]);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,13 +141,19 @@ export default function App() {
   const navLabel = NAV_ITEMS.find((n) => n.id === active)?.label ?? "Overview";
 
   return (
-    <div className="relative flex min-h-screen overflow-hidden bg-[var(--page)]">
-      <div className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-[var(--accent)] opacity-[0.05] blur-3xl" />
-      <div className="pointer-events-none absolute right-0 top-1/3 h-72 w-72 rounded-full bg-[var(--series-blue)] opacity-[0.04] blur-3xl" />
+    <div className="relative flex h-screen overflow-hidden bg-[var(--page)]">
+      <motion.div
+        style={{ y: orb1Y }}
+        className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-[var(--accent)] opacity-[0.06] blur-3xl"
+      />
+      <motion.div
+        style={{ y: orb2Y }}
+        className="pointer-events-none absolute right-0 top-1/3 h-72 w-72 rounded-full bg-[var(--series-blue)] opacity-[0.05] blur-3xl"
+      />
 
       <Sidebar active={active} onSelect={setActive} />
 
-      <main className="relative z-10 flex-1 p-6">
+      <main ref={scrollRef} className="relative z-10 flex-1 overflow-y-auto p-6">
         <Topbar data={data} />
 
         <AnimatePresence mode="wait">
@@ -178,7 +200,7 @@ export default function App() {
                   </motion.div>
 
                   <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                    <Panel title="Spend distribution">
+                    <Panel title="Spend distribution" scrollContainerRef={scrollRef}>
                       <DonutChart slices={classSlices} centerLabel="total spend" />
                     </Panel>
 
@@ -198,13 +220,13 @@ export default function App() {
                       variants={item}
                       className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--card-shadow)] lg:col-span-2"
                     >
-                      <div className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--ink-muted)]">
-                        Spend trend
+                      <div className="mb-1">
+                        <SectionTitle scrollContainerRef={scrollRef}>Spend trend</SectionTitle>
                       </div>
                       <SpendTrendChart points={data.trend} />
                     </motion.div>
 
-                    <Panel title="Spend by confidence">
+                    <Panel title="Spend by confidence" scrollContainerRef={scrollRef}>
                       <DonutChart slices={confidenceSlices} centerLabel="flagged spend" />
                     </Panel>
                   </div>
@@ -216,7 +238,9 @@ export default function App() {
                   </div>
 
                   <div id="clusters">
-                    <div className="mb-3 text-xs font-medium uppercase tracking-wide text-[var(--ink-muted)]">Clusters</div>
+                    <div className="mb-3">
+                      <SectionTitle scrollContainerRef={scrollRef}>Clusters</SectionTitle>
+                    </div>
                     {data.clusters.length === 0 ? (
                       <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] py-8 text-center text-sm text-[var(--ink-muted)] shadow-[var(--card-shadow)]">
                         No clusters have shipped data yet.
@@ -230,7 +254,7 @@ export default function App() {
                     )}
                   </div>
 
-                  <Panel title="Top fix opportunities">
+                  <Panel title="Top fix opportunities" scrollContainerRef={scrollRef}>
                     <div id="fix-opportunities" />
                     <TopFixesTable findings={data.top_fixes} />
                   </Panel>
@@ -241,5 +265,23 @@ export default function App() {
         </AnimatePresence>
       </main>
     </div>
+  );
+}
+
+export default function App() {
+  const [entered, setEntered] = useState(false);
+
+  return (
+    <AnimatePresence mode="wait">
+      {!entered ? (
+        <motion.div key="landing" exit={{ opacity: 0 }}>
+          <LandingPage onEnter={() => setEntered(true)} />
+        </motion.div>
+      ) : (
+        <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+          <Dashboard />
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
