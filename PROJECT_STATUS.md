@@ -139,6 +139,23 @@ Two components, two Go modules:
       by the same cloud/region data, rendered as a real donut. Verified
       live with a genuine two-cluster (aws/ap-south-1, gcp/asia-south1)
       ingest: correctly split 71.1%/28.9%, not simulated.
+    - **The six remaining sidebar pages are all real too** (built earlier
+      this session, this file just hadn't caught up):
+      **Insights** (top destinations by cost, confidence breakdown, an
+      "at a glance" summary — all derived from real aggregates, no new
+      data source), **Explorer** (multi-dimension filter over the same
+      real findings Costs & Usage shows), **Workloads** (real per-source
+      aggregation — destinations, dominant path class, bytes, cost),
+      **Reports** (real combined trend chart + real client-side CSV
+      export of the live findings), **Automations** (lists the real
+      generated `NetworkPolicy` manifests with copy/download — explicitly
+      does **not** apply them; the control plane has no write access to
+      any cluster, and that's a deliberate scope boundary, not an
+      oversight), **Settings** (real config facts — auth mode, storage
+      engine, connected cluster/workload/finding counts — no fake
+      toggles for features that don't exist). Verified live: clicked
+      through all six with real ingested data, zero console errors, zero
+      fabricated/undefined values.
     - **Carbon footprint** — still no real carbon-intensity data source
       (no cloud provider API, no grid-carbon API). Per an explicit choice
       you made over leaving it "Coming soon," it's now a labeled rough
@@ -188,9 +205,6 @@ labeled "Coming soon," never filled with invented numbers:
 - **A real forecasting/ML model** — only the honest linear-projection exists
   (§3). A genuine demand forecast would need a real time-series model and
   calendar-aligned data this agent doesn't collect.
-- **Insights, Explorer, Workloads, Reports, Automations, Settings** — sidebar
-  items with no real page behind them yet. Clicking them shows a clear
-  "not built yet" page, not a fake one.
 - **No multi-tenant accounts / RBAC** — one shared Basic Auth token, no
   per-user identity. The sidebar's "Admin / shared token access" label
   reflects this honestly rather than fabricating a named logged-in user.
@@ -206,11 +220,10 @@ labeled "Coming soon," never filled with invented numbers:
 | 1 | Flip 4 GHCR packages to public (web UI, listed in §4) | **You** | 5 min |
 | 2 | A second real price book (GCP/Azure), if wanted | Both | Medium — the plumbing (cloud/region grouping end-to-end) is done; every live agent still runs the same AWS price book today, so "Spend by provider" correctly shows one 100% slice until a second cloud is actually configured |
 | 3 | A genuine forecasting model (if the linear projection isn't enough) | Both | Large — needs a real time-series approach and more historical data than currently retained |
-| 4 | Build out Insights / Explorer / Workloads / Reports / Automations / Settings | Both | Medium each — some (Workloads, Reports) are mostly data already available; Automations implies a real remediation-execution engine, which is a bigger scope decision |
-| 5 | Multi-tenant accounts / real RBAC | Both | Large — a genuine new subsystem, only worth it if this becomes a multi-customer product rather than a single-operator tool |
-| 6 | Frontend bundle size (886KB, no code-splitting) | Me | Small — `React.lazy`/dynamic imports per page |
-| 7 | Commit the ad-hoc Playwright verification scripts into a real CI-run E2E suite | Me | Medium — they exist as throwaway scripts today, proven useful, worth making permanent |
-| 8 | Business/GTM (pricing, personas, launch) | You | Deprioritized per your own direction — technical completeness came first |
+| 4 | Multi-tenant accounts / real RBAC | Both | Large — a genuine new subsystem, only worth it if this becomes a multi-customer product rather than a single-operator tool |
+| 5 | Frontend bundle size (886KB, no code-splitting) | Me | Small — `React.lazy`/dynamic imports per page |
+| 6 | Commit the ad-hoc Playwright verification scripts into a real CI-run E2E suite | Me | Medium — they exist as throwaway scripts today, proven useful, worth making permanent |
+| 7 | Business/GTM (pricing, personas, launch) | You | Deprioritized per your own direction — technical completeness came first |
 
 ---
 
@@ -238,7 +251,7 @@ above.
   assistant panel that can answer cluster-specific questions using the
   real ingested findings as context, rather than a bolt-on chatbot with
   no access to actual cluster state. This depends on the multi-tenant
-  work in punch-list item #5 landing first, since a shared model
+  work in punch-list item #4 landing first, since a shared model
   reasoning over multiple customers' traffic needs real tenant isolation
   before it can ship.
 - **Why this order**: the fine-tuning work is happening in parallel with
@@ -254,6 +267,7 @@ above.
 The agent's core claims (byte-accurate attribution, real topology
 classification, real fix generation) are measured, not asserted. The
 control plane and dashboard are a genuinely working multi-cluster product
-with real user-facing features, not a static mockup. The two real gaps that
-need your action are #1 above (five minutes) and a decision on how far to
-take #2–#5 (all genuinely bigger scope, not oversights).
+with real user-facing features, not a static mockup — every sidebar page
+now has real content behind it. The one action item that needs you
+directly is #1 above (five minutes); the rest (#2–#4) are genuine scope
+decisions, not oversights.
