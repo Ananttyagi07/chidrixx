@@ -25,6 +25,8 @@ type shipperFinding struct {
 	CostHighINR float64 `json:"cost_high_inr"`
 	FixHint     string  `json:"fix_hint"`
 	FixManifest string  `json:"fix_manifest"`
+	Cloud       string  `json:"cloud"`
+	Region      string  `json:"region"`
 }
 
 type shipperRequest struct {
@@ -75,6 +77,8 @@ func (s *Shipper) Ship(ctx context.Context, findings []*Finding) error {
 			CostHighINR: f.CostHighINR,
 			FixHint:     f.FixHint,
 			FixManifest: f.FixManifest,
+			Cloud:       f.Cloud,
+			Region:      f.Region,
 		})
 	}
 

@@ -16,6 +16,8 @@ type Finding struct {
 	CostHighINR float64 `json:"cost_high_inr"`
 	FixHint     string  `json:"fix_hint"`
 	FixManifest string  `json:"fix_manifest"`
+	Cloud       string  `json:"cloud"`
+	Region      string  `json:"region"`
 }
 
 // IngestRequest is one snapshot of an agent's cumulative-since-start

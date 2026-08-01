@@ -43,7 +43,9 @@ CREATE TABLE IF NOT EXISTS flow_aggregate (
 	cost_low_inr             REAL NOT NULL,
 	cost_high_inr            REAL NOT NULL,
 	fix_hint                 TEXT,
-	fix_manifest             TEXT
+	fix_manifest             TEXT,
+	cloud                    TEXT,
+	region                   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_flow_aggregate_cluster_time ON flow_aggregate(cluster_id, reported_at);
 
@@ -69,6 +71,16 @@ CREATE TABLE IF NOT EXISTS settings (
 		return nil, fmt.Errorf("migrate fix_manifest column: %w", err)
 	}
 
+	// cloud/region were added after this table's original release too --
+	// same migration pattern, same reason.
+	for _, col := range []string{"cloud", "region"} {
+		if _, err := db.Exec(`ALTER TABLE flow_aggregate ADD COLUMN ` + col + ` TEXT`); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column name") {
+			db.Close()
+			return nil, fmt.Errorf("migrate %s column: %w", col, err)
+		}
+	}
+
 	return &Store{db: db}, nil
 }
 
@@ -89,8 +101,9 @@ func (s *Store) Ingest(clusterID string, findings []Finding) error {
 	stmt, err := tx.Prepare(`
 		INSERT INTO flow_aggregate
 			(cluster_id, reported_at, src_workload, dst_workload_or_endpoint,
-			 path_class, confidence, bytes_tx, bytes_rx, cost_low_inr, cost_high_inr, fix_hint, fix_manifest)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 path_class, confidence, bytes_tx, bytes_rx, cost_low_inr, cost_high_inr, fix_hint, fix_manifest,
+			 cloud, region)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		tx.Rollback()
@@ -103,6 +116,7 @@ func (s *Store) Ingest(clusterID string, findings []Finding) error {
 			clusterID, reportedAt, f.Source, f.Destination,
 			f.PathClass, f.Confidence, f.BytesTx, f.BytesRx,
 			f.CostLowINR, f.CostHighINR, f.FixHint, f.FixManifest,
+			f.Cloud, f.Region,
 		); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("insert finding: %w", err)
@@ -119,6 +133,12 @@ type ClusterSummary struct {
 	FindingCount int
 	CostLowINR   float64
 	CostHighINR  float64
+	// Cloud/Region reflect whichever price book the agent that shipped
+	// this snapshot was configured with (MIN() is arbitrary but stable —
+	// in practice one cluster's agent uses one price book, so every row
+	// in a snapshot carries the same value).
+	Cloud  string
+	Region string
 }
 
 // Clusters returns every distinct cluster that has ever ingested, with its
@@ -130,7 +150,8 @@ func (s *Store) Clusters() ([]ClusterSummary, error) {
 			FROM flow_aggregate
 			GROUP BY cluster_id
 		)
-		SELECT fa.cluster_id, l.max_time, COUNT(*), COALESCE(SUM(fa.cost_low_inr), 0), COALESCE(SUM(fa.cost_high_inr), 0)
+		SELECT fa.cluster_id, l.max_time, COUNT(*), COALESCE(SUM(fa.cost_low_inr), 0), COALESCE(SUM(fa.cost_high_inr), 0),
+		       COALESCE(MIN(NULLIF(fa.cloud, '')), ''), COALESCE(MIN(NULLIF(fa.region, '')), '')
 		FROM flow_aggregate fa
 		JOIN latest l ON fa.cluster_id = l.cluster_id AND fa.reported_at = l.max_time
 		GROUP BY fa.cluster_id, l.max_time
@@ -145,7 +166,10 @@ func (s *Store) Clusters() ([]ClusterSummary, error) {
 	for rows.Next() {
 		var c ClusterSummary
 		var lastSeen int64
-		if err := rows.Scan(&c.ClusterID, &lastSeen, &c.FindingCount, &c.CostLowINR, &c.CostHighINR); err != nil {
+		if err := rows.Scan(
+			&c.ClusterID, &lastSeen, &c.FindingCount, &c.CostLowINR, &c.CostHighINR,
+			&c.Cloud, &c.Region,
+		); err != nil {
 			return nil, fmt.Errorf("scan cluster row: %w", err)
 		}
 		c.LastSeen = time.Unix(lastSeen, 0)
@@ -174,7 +198,8 @@ func (s *Store) LatestFindings(limit int) ([]FindingRow, error) {
 		)
 		SELECT fa.cluster_id, fa.reported_at, fa.src_workload, fa.dst_workload_or_endpoint,
 		       fa.path_class, fa.confidence, fa.bytes_tx, fa.bytes_rx,
-		       fa.cost_low_inr, fa.cost_high_inr, fa.fix_hint, fa.fix_manifest
+		       fa.cost_low_inr, fa.cost_high_inr, fa.fix_hint, fa.fix_manifest,
+		       fa.cloud, fa.region
 		FROM flow_aggregate fa
 		JOIN latest l ON fa.cluster_id = l.cluster_id AND fa.reported_at = l.max_time
 		ORDER BY fa.cost_high_inr DESC
@@ -189,12 +214,13 @@ func (s *Store) LatestFindings(limit int) ([]FindingRow, error) {
 	for rows.Next() {
 		var r FindingRow
 		var reportedAt int64
-		var fixHint, fixManifest sql.NullString
+		var fixHint, fixManifest, cloud, region sql.NullString
 
 		if err := rows.Scan(
 			&r.ClusterID, &reportedAt, &r.Source, &r.Destination,
 			&r.PathClass, &r.Confidence, &r.BytesTx, &r.BytesRx,
 			&r.CostLowINR, &r.CostHighINR, &fixHint, &fixManifest,
+			&cloud, &region,
 		); err != nil {
 			return nil, fmt.Errorf("scan finding row: %w", err)
 		}
@@ -202,6 +228,8 @@ func (s *Store) LatestFindings(limit int) ([]FindingRow, error) {
 		r.ReportedAt = time.Unix(reportedAt, 0)
 		r.FixHint = fixHint.String
 		r.FixManifest = fixManifest.String
+		r.Cloud = cloud.String
+		r.Region = region.String
 		out = append(out, r)
 	}
 
@@ -288,6 +316,54 @@ func (s *Store) SpendByClass() ([]ClassSpend, error) {
 		var c ClassSpend
 		if err := rows.Scan(&c.PathClass, &c.CostHighINR, &c.FindingCount); err != nil {
 			return nil, fmt.Errorf("scan class spend: %w", err)
+		}
+		out = append(out, c)
+	}
+
+	return out, rows.Err()
+}
+
+// CloudSpend is the total cost attributed to one (cloud, region) pair,
+// across the latest snapshot per cluster. Real infrastructure, honestly
+// scoped: with only one price book (AWS/ap-south-1) configured across
+// every agent today, this correctly shows a single 100% slice -- it
+// becomes a genuine multi-cloud breakdown the moment a second cluster
+// ships with a different price book, not before.
+type CloudSpend struct {
+	Cloud        string
+	Region       string
+	CostHighINR  float64
+	FindingCount int
+}
+
+// SpendByCloud groups the current state by (cloud, region), highest cost
+// first. Rows with no cloud/region recorded (findings shipped before this
+// field existed) fold into a single "unknown" bucket rather than being
+// silently dropped.
+func (s *Store) SpendByCloud() ([]CloudSpend, error) {
+	rows, err := s.db.Query(`
+		WITH latest AS (
+			SELECT cluster_id, MAX(reported_at) AS max_time
+			FROM flow_aggregate
+			GROUP BY cluster_id
+		)
+		SELECT COALESCE(NULLIF(fa.cloud, ''), 'unknown'), COALESCE(NULLIF(fa.region, ''), 'unknown'),
+		       COALESCE(SUM(fa.cost_high_inr), 0), COUNT(*)
+		FROM flow_aggregate fa
+		JOIN latest l ON fa.cluster_id = l.cluster_id AND fa.reported_at = l.max_time
+		GROUP BY 1, 2
+		ORDER BY SUM(fa.cost_high_inr) DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query spend by cloud: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]CloudSpend, 0)
+	for rows.Next() {
+		var c CloudSpend
+		if err := rows.Scan(&c.Cloud, &c.Region, &c.CostHighINR, &c.FindingCount); err != nil {
+			return nil, fmt.Errorf("scan cloud spend: %w", err)
 		}
 		out = append(out, c)
 	}

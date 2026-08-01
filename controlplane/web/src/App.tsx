@@ -2,12 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useScroll, useTransform } from "framer-motion";
 import { fetchDashboardSummary } from "./api";
 import type { DashboardSummary } from "./types";
-import { StatCard, StatCardComingSoon } from "./components/StatCard";
+import { StatCard } from "./components/StatCard";
 import { SpendTrendChart } from "./components/SpendTrendChart";
 import { DonutChart, type DonutSlice } from "./components/DonutChart";
 import { ClusterCard } from "./components/ClusterCard";
 import { TopFixesTable } from "./components/TopFixesTable";
-import { ComingSoonCard } from "./components/ComingSoon";
 import { BudgetCard } from "./components/BudgetCard";
 import { AnomalyCard } from "./components/AnomalyCard";
 import { TrendProjectionCard } from "./components/TrendProjectionCard";
@@ -27,6 +26,9 @@ import { AnimatedNumber, AnimatedRange } from "./components/AnimatedNumber";
 import { CATEGORICAL, PATH_CLASS_COLOR, PATH_CLASS_LABEL, STATUS } from "./palette";
 import { container, item } from "./motion";
 import { formatBytes, formatINR } from "./format";
+import { ClusterTopologyCard } from "./components/ClusterTopologyCard";
+import { SpendByProviderCard } from "./components/SpendByProviderCard";
+import { CarbonFootprintCard } from "./components/CarbonFootprintCard";
 
 // Pages that need the shared dashboard-summary fetch, keyed by nav id.
 // costs/explorer/workloads fetch their own data (the full findings list,
@@ -237,7 +239,9 @@ function Dashboard() {
                     <StatCard label="Active workloads">
                       <AnimatedNumber value={data.summary.WorkloadCount} format={(n) => String(Math.round(n))} />
                     </StatCard>
-                    <StatCardComingSoon label="Carbon footprint" />
+                    <CarbonFootprintCard
+                      totalBytes={data.summary.TotalBytesTx + data.summary.TotalBytesRx}
+                    />
                   </motion.div>
 
                   <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -245,15 +249,13 @@ function Dashboard() {
                       <DonutChart slices={classSlices} centerLabel="total spend" />
                     </Panel>
 
-                    <ComingSoonCard
-                      title="Multi-cloud topology"
-                      note="chidrixx attributes one cluster's network paths today — a cross-cloud view needs multi-provider ingestion this doesn't have yet."
-                    />
+                    <Panel title="Cluster topology" scrollContainerRef={scrollRef}>
+                      <ClusterTopologyCard clusters={data.clusters} />
+                    </Panel>
 
-                    <ComingSoonCard
-                      title="Spend by provider"
-                      note="Single-cloud price book (AWS) today — no Azure/GCP/OCI attribution."
-                    />
+                    <Panel title="Spend by provider" scrollContainerRef={scrollRef}>
+                      <SpendByProviderCard clouds={data.spend_by_cloud} />
+                    </Panel>
                   </div>
 
                   <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

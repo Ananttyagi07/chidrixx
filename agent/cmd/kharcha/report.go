@@ -47,6 +47,15 @@ type Finding struct {
 	FixHint     string
 	FixManifest string
 
+	// Cloud/Region come straight from the loaded price book
+	// (PriceBook.Cloud/Region) -- real, not inferred. A single agent
+	// only ever knows one price book, so every finding it produces
+	// carries the same values; multi-cloud attribution becomes real the
+	// moment a second cluster runs with a different price book, not
+	// before.
+	Cloud  string
+	Region string
+
 	BytesTx     uint64
 	BytesRx     uint64
 	CostLowINR  float64
@@ -337,6 +346,9 @@ func (a *Aggregate) Add(
 			Confidence:  confidence,
 			FixHint:     fixHints[class],
 			FixManifest: generateFixManifest(class, sourceNamespace, remoteIP),
+
+			Cloud:  a.priceBook.Cloud,
+			Region: a.priceBook.Region,
 		}
 
 		a.byKey[key] = f
@@ -365,6 +377,8 @@ func (a *Aggregate) Add(
 		f.Confidence = confidence
 		f.FixHint = fixHints[class]
 		f.FixManifest = generateFixManifest(class, sourceNamespace, remoteIP)
+		f.Cloud = a.priceBook.Cloud
+		f.Region = a.priceBook.Region
 	}
 
 	f.BytesTx += tx

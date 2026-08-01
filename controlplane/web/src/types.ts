@@ -13,6 +13,8 @@ export interface Finding {
   cost_high_inr: number;
   fix_hint: string;
   fix_manifest: string;
+  cloud: string;
+  region: string;
 }
 
 export interface FindingRow extends Finding {
@@ -41,12 +43,21 @@ export interface CostTrendPoint {
   CostHigh: number;
 }
 
+export interface CloudSpend {
+  Cloud: string;
+  Region: string;
+  CostHighINR: number;
+  FindingCount: number;
+}
+
 export interface ClusterSummaryView {
   ClusterID: string;
   LastSeen: string;
   FindingCount: number;
   CostLowINR: number;
   CostHighINR: number;
+  Cloud: string;
+  Region: string;
   trend: CostTrendPoint[];
 }
 
@@ -60,6 +71,7 @@ export interface AnomalyPoint {
 export interface DashboardSummary {
   summary: Summary;
   spend_by_class: ClassSpend[];
+  spend_by_cloud: CloudSpend[];
   trend: CostTrendPoint[];
   clusters: ClusterSummaryView[];
   top_fixes: FindingRow[];

@@ -250,6 +250,75 @@ func TestSpendByClassGroupsAndRanksByCost(t *testing.T) {
 	}
 }
 
+func TestSpendByCloudGroupsByCloudAndRegion(t *testing.T) {
+	s := testStore(t)
+
+	if err := s.Ingest("cluster-a", []Finding{
+		{Source: "ns/a", Destination: "1.1.1.1", PathClass: "INTERNET_EGRESS", CostHighINR: 10, Cloud: "aws", Region: "ap-south-1"},
+		{Source: "ns/b", Destination: "2.2.2.2", PathClass: "INTERNET_EGRESS", CostHighINR: 5, Cloud: "aws", Region: "ap-south-1"},
+	}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if err := s.Ingest("cluster-b", []Finding{
+		{Source: "ns/c", Destination: "3.3.3.3", PathClass: "INTERNET_EGRESS", CostHighINR: 20, Cloud: "gcp", Region: "asia-south1"},
+	}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	clouds, err := s.SpendByCloud()
+	if err != nil {
+		t.Fatalf("SpendByCloud: %v", err)
+	}
+
+	if len(clouds) != 2 {
+		t.Fatalf("expected 2 (cloud, region) groups, got %d: %+v", len(clouds), clouds)
+	}
+	if clouds[0].Cloud != "gcp" || clouds[0].Region != "asia-south1" || clouds[0].CostHighINR != 20 {
+		t.Errorf("expected gcp/asia-south1 (20) ranked first, got %+v", clouds[0])
+	}
+	if clouds[1].Cloud != "aws" || clouds[1].Region != "ap-south-1" || clouds[1].CostHighINR != 15 || clouds[1].FindingCount != 2 {
+		t.Errorf("expected aws/ap-south-1 (15, 2 findings) ranked second, got %+v", clouds[1])
+	}
+}
+
+func TestSpendByCloudFoldsMissingCloudIntoUnknown(t *testing.T) {
+	s := testStore(t)
+
+	if err := s.Ingest("cluster-a", []Finding{
+		{Source: "ns/a", Destination: "1.1.1.1", PathClass: "INTERNET_EGRESS", CostHighINR: 10},
+	}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	clouds, err := s.SpendByCloud()
+	if err != nil {
+		t.Fatalf("SpendByCloud: %v", err)
+	}
+
+	if len(clouds) != 1 || clouds[0].Cloud != "unknown" || clouds[0].Region != "unknown" {
+		t.Fatalf("expected a single 'unknown' bucket for findings shipped without cloud/region, got: %+v", clouds)
+	}
+}
+
+func TestClustersIncludesCloudAndRegion(t *testing.T) {
+	s := testStore(t)
+
+	if err := s.Ingest("cluster-a", []Finding{
+		{Source: "ns/a", Destination: "1.1.1.1", PathClass: "INTERNET_EGRESS", CostHighINR: 10, Cloud: "aws", Region: "ap-south-1"},
+	}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	clusters, err := s.Clusters()
+	if err != nil {
+		t.Fatalf("Clusters: %v", err)
+	}
+
+	if len(clusters) != 1 || clusters[0].Cloud != "aws" || clusters[0].Region != "ap-south-1" {
+		t.Fatalf("expected cluster-a tagged aws/ap-south-1, got: %+v", clusters)
+	}
+}
+
 func TestGlobalTrendSumsAcrossClustersOldestFirst(t *testing.T) {
 	s := testStore(t)
 

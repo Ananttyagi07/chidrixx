@@ -39,6 +39,9 @@ func TestHandleDashboardSummary(t *testing.T) {
 	if len(got.SpendByClass) != 2 {
 		t.Errorf("expected 2 path classes, got %+v", got.SpendByClass)
 	}
+	if len(got.SpendByCloud) != 1 || got.SpendByCloud[0].Cloud != "unknown" {
+		t.Errorf("expected a single unknown cloud bucket (no Cloud set in this test's findings), got %+v", got.SpendByCloud)
+	}
 	if len(got.Clusters) != 1 || got.Clusters[0].ClusterID != "cluster-a" {
 		t.Errorf("unexpected clusters: %+v", got.Clusters)
 	}
@@ -63,7 +66,7 @@ func TestHandleDashboardSummaryEmptyStateHasNoNullArrays(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
 	}
 
-	for _, field := range []string{`"spend_by_class":null`, `"trend":null`, `"clusters":null`, `"top_fixes":null`, `"anomalies":null`} {
+	for _, field := range []string{`"spend_by_class":null`, `"spend_by_cloud":null`, `"trend":null`, `"clusters":null`, `"top_fixes":null`, `"anomalies":null`} {
 		if bytes.Contains(rec.Body.Bytes(), []byte(field)) {
 			t.Errorf("empty-state response contains %s — must be [] for the frontend's .map() calls, got: %s", field, rec.Body.String())
 		}

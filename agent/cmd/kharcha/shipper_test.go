@@ -38,6 +38,8 @@ func TestShipperWireFormatMatchesControlPlaneContract(t *testing.T) {
 			CostLowINR: 1.5, CostHighINR: 2.5,
 			FixHint:     "cache or compress it",
 			FixManifest: "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\n",
+			Cloud:       "aws",
+			Region:      "ap-south-1",
 		},
 	}
 
@@ -62,6 +64,8 @@ func TestShipperWireFormatMatchesControlPlaneContract(t *testing.T) {
 		"cost_low_inr": 1.5, "cost_high_inr": 2.5,
 		"fix_hint":     "cache or compress it",
 		"fix_manifest": "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\n",
+		"cloud":        "aws",
+		"region":       "ap-south-1",
 	} {
 		if f[key] != want {
 			t.Errorf("field %s = %v, want %v", key, f[key], want)

@@ -1,6 +1,5 @@
 import { motion } from "framer-motion";
 import { Area, AreaChart, ResponsiveContainer } from "recharts";
-import { IconConstruction } from "../icons";
 import { cardMotion } from "../motion";
 
 // A stat tile per the dataviz skill's form heuristic. No delta arrow
@@ -55,21 +54,6 @@ export function StatCard({
           </ResponsiveContainer>
         </div>
       )}
-    </motion.div>
-  );
-}
-
-export function StatCardComingSoon({ label }: { label: string }) {
-  return (
-    <motion.div
-      {...cardMotion}
-      className="flex flex-col justify-between rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] p-4 opacity-70 shadow-[var(--card-shadow)]"
-    >
-      <div className="text-xs font-medium uppercase tracking-wide text-[var(--ink-muted)]">{label}</div>
-      <div className="mt-2 flex items-center gap-1.5 text-sm text-[var(--ink-muted)]">
-        <IconConstruction className="h-4 w-4" />
-        Coming soon
-      </div>
     </motion.div>
   );
 }

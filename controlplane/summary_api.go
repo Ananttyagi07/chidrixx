@@ -22,6 +22,7 @@ type clusterSummaryView struct {
 type dashboardSummaryResponse struct {
 	Summary      Summary              `json:"summary"`
 	SpendByClass []ClassSpend         `json:"spend_by_class"`
+	SpendByCloud []CloudSpend         `json:"spend_by_cloud"`
 	Trend        []CostTrendPoint     `json:"trend"`
 	Clusters     []clusterSummaryView `json:"clusters"`
 	TopFixes     []FindingRow         `json:"top_fixes"`
@@ -103,9 +104,17 @@ func handleDashboardSummary(store *Store) http.HandlerFunc {
 			return
 		}
 
+		spendByCloud, err := store.SpendByCloud()
+		if err != nil {
+			log.Printf("dashboard-summary: spend by cloud: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
 		resp := dashboardSummaryResponse{
 			Summary:      summary,
 			SpendByClass: spendByClass,
+			SpendByCloud: spendByCloud,
 			Trend:        trend,
 			Clusters:     clusterViews,
 			TopFixes:     topFixes,
