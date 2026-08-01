@@ -303,6 +303,13 @@ type KubernetesResolver struct {
 	byNodeIP   map[string]*KubeNode
 
 	lastRefresh time.Time
+
+	// lastReplicas/pendingEvents back real deploy-event detection (see
+	// deployevents.go) -- protected by mu like everything else here, since
+	// they're written from the periodic refresh goroutine and drained from
+	// the ship loop's goroutine in main.go.
+	lastReplicas  map[string]int32
+	pendingEvents []DeployEvent
 }
 
 func NewKubernetesResolver() *KubernetesResolver {

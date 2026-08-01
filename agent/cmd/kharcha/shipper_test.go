@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // TestShipperWireFormatMatchesControlPlaneContract proves the exact JSON
@@ -43,7 +44,11 @@ func TestShipperWireFormatMatchesControlPlaneContract(t *testing.T) {
 		},
 	}
 
-	if err := shipper.Ship(context.Background(), findings); err != nil {
+	events := []DeployEvent{
+		{Namespace: "checkout", Name: "checkout", Reason: "ReplicaCountChanged", Message: "replicas increased from 2 to 5", OccurredAt: time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)},
+	}
+
+	if err := shipper.Ship(context.Background(), findings, events); err != nil {
 		t.Fatalf("Ship: %v", err)
 	}
 
@@ -71,6 +76,20 @@ func TestShipperWireFormatMatchesControlPlaneContract(t *testing.T) {
 			t.Errorf("field %s = %v, want %v", key, f[key], want)
 		}
 	}
+
+	evs, ok := captured["events"].([]any)
+	if !ok || len(evs) != 1 {
+		t.Fatalf("expected 1 event in events array, got: %+v", captured["events"])
+	}
+	ev := evs[0].(map[string]any)
+	for key, want := range map[string]any{
+		"namespace": "checkout", "name": "checkout",
+		"reason": "ReplicaCountChanged", "message": "replicas increased from 2 to 5",
+	} {
+		if ev[key] != want {
+			t.Errorf("event field %s = %v, want %v", key, ev[key], want)
+		}
+	}
 }
 
 // TestShipperDisabledWithoutURL proves an empty control-plane URL is a
@@ -78,7 +97,7 @@ func TestShipperWireFormatMatchesControlPlaneContract(t *testing.T) {
 func TestShipperDisabledWithoutURL(t *testing.T) {
 	shipper := NewShipper("", "chidrixx-lab", "")
 
-	if err := shipper.Ship(context.Background(), []*Finding{{Source: "ns/app"}}); err != nil {
+	if err := shipper.Ship(context.Background(), []*Finding{{Source: "ns/app"}}, nil); err != nil {
 		t.Fatalf("expected no-op with empty URL, got error: %v", err)
 	}
 }
@@ -100,7 +119,7 @@ func TestShipperSendsBasicAuthToken(t *testing.T) {
 
 	shipper := NewShipper(srv.URL, "chidrixx-lab", "secret-token")
 
-	if err := shipper.Ship(context.Background(), []*Finding{{Source: "ns/app"}}); err != nil {
+	if err := shipper.Ship(context.Background(), []*Finding{{Source: "ns/app"}}, nil); err != nil {
 		t.Fatalf("Ship: %v", err)
 	}
 

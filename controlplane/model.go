@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package main
 
+import "time"
+
 // Finding is the wire format an agent ships one row of its cumulative
 // report as. It mirrors the build manual's frozen flow_aggregate schema
 // (src_workload, dst_workload_or_endpoint, path_class, bytes, cost bounds,
@@ -20,6 +22,18 @@ type Finding struct {
 	Region      string  `json:"region"`
 }
 
+// DeployEvent mirrors the agent's own DeployEvent (agent/cmd/kharcha/deployevents.go)
+// -- a real, observed Deployment replica-count change, not a guess. Used
+// for root-cause correlation: "did a deployment scale right before this
+// cluster's cost jumped?"
+type DeployEvent struct {
+	Namespace  string    `json:"namespace"`
+	Name       string    `json:"name"`
+	Reason     string    `json:"reason"`
+	Message    string    `json:"message"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
 // IngestRequest is one snapshot of an agent's cumulative-since-start
 // aggregate, tagged with which cluster it came from. Each ingest is a full
 // snapshot (the agent's own model is cumulative, not fixed time windows),
@@ -27,6 +41,7 @@ type Finding struct {
 // always serves the latest snapshot per cluster for "current state," while
 // keeping every snapshot for trend-over-time.
 type IngestRequest struct {
-	ClusterID string    `json:"cluster_id"`
-	Findings  []Finding `json:"findings"`
+	ClusterID string        `json:"cluster_id"`
+	Findings  []Finding     `json:"findings"`
+	Events    []DeployEvent `json:"events"`
 }

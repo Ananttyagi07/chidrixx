@@ -391,6 +391,7 @@ func main() {
 						err,
 					)
 				}
+				kube.refreshDeployEvents()
 			}
 		}
 	}()
@@ -440,7 +441,7 @@ func main() {
 			recordCostMetrics(agg)
 			alerter.Check(agg.Findings())
 
-			if err := shipper.Ship(ctx, agg.Findings()); err != nil {
+			if err := shipper.Ship(ctx, agg.Findings(), kube.DrainDeployEvents()); err != nil {
 				log.Printf("ship to control plane: %v", err)
 			}
 		}

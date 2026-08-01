@@ -41,6 +41,16 @@ func handleIngest(store *Store) http.HandlerFunc {
 			return
 		}
 
+		// Deploy events are a best-effort correlation signal, not part of
+		// the frozen findings contract -- a storage failure here logs but
+		// doesn't fail the whole ingest (the real cost data above already
+		// committed).
+		if len(req.Events) > 0 {
+			if err := store.IngestDeployEvents(tenantID, req.ClusterID, req.Events); err != nil {
+				log.Printf("ingest deploy events %s: %v", req.ClusterID, err)
+			}
+		}
+
 		w.WriteHeader(http.StatusAccepted)
 	}
 }

@@ -40,6 +40,80 @@ func TestDetectAnomaliesFlagsGrowthAboveThreshold(t *testing.T) {
 	if anomalies[0].PreviousCostINR != 1 || anomalies[0].CurrentCostINR != 5 || anomalies[0].GrowthRatio != 5 {
 		t.Errorf("unexpected anomaly values: %+v", anomalies[0])
 	}
+	if anomalies[0].LikelyCause != nil {
+		t.Errorf("expected no LikelyCause with no deploy events ever ingested, got: %+v", anomalies[0].LikelyCause)
+	}
+}
+
+func TestDetectAnomaliesCorrelatesWithRecentDeployEvent(t *testing.T) {
+	s := testStore(t)
+	tenantID := testTenant(t, s)
+
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{{Source: "ns/a", CostHighINR: 1}}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{{Source: "ns/a", CostHighINR: 10}}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	// A real deploy event shortly before the jump -- should surface as the
+	// likely cause.
+	if err := s.IngestDeployEvents(tenantID, "cluster-a", []DeployEvent{
+		{Namespace: "ai-gateway", Name: "ai-gateway", Reason: "ReplicaCountChanged",
+			Message: "replicas increased from 2 to 20", OccurredAt: time.Now().Add(-5 * time.Minute)},
+	}); err != nil {
+		t.Fatalf("IngestDeployEvents: %v", err)
+	}
+
+	anomalies, err := detectAnomalies(s, tenantID)
+	if err != nil {
+		t.Fatalf("detectAnomalies: %v", err)
+	}
+
+	if len(anomalies) != 1 {
+		t.Fatalf("expected 1 anomaly, got %d: %+v", len(anomalies), anomalies)
+	}
+	cause := anomalies[0].LikelyCause
+	if cause == nil {
+		t.Fatal("expected a LikelyCause correlated from the real deploy event, got nil")
+	}
+	if cause.Namespace != "ai-gateway" || cause.Message != "replicas increased from 2 to 20" {
+		t.Errorf("unexpected LikelyCause: %+v", cause)
+	}
+}
+
+func TestDetectAnomaliesDoesNotCorrelateEventsOutsideLookbackWindow(t *testing.T) {
+	s := testStore(t)
+	tenantID := testTenant(t, s)
+
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{{Source: "ns/a", CostHighINR: 1}}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{{Source: "ns/a", CostHighINR: 10}}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	// A deploy event from days ago -- well outside anomalyCauseLookback,
+	// must not be reported as the cause of a jump that just happened.
+	if err := s.IngestDeployEvents(tenantID, "cluster-a", []DeployEvent{
+		{Namespace: "unrelated", Name: "unrelated", Reason: "ReplicaCountChanged", OccurredAt: time.Now().Add(-72 * time.Hour)},
+	}); err != nil {
+		t.Fatalf("IngestDeployEvents: %v", err)
+	}
+
+	anomalies, err := detectAnomalies(s, tenantID)
+	if err != nil {
+		t.Fatalf("detectAnomalies: %v", err)
+	}
+
+	if len(anomalies) != 1 {
+		t.Fatalf("expected 1 anomaly, got %d", len(anomalies))
+	}
+	if anomalies[0].LikelyCause != nil {
+		t.Errorf("expected no LikelyCause from a 72h-old event outside the lookback window, got: %+v", anomalies[0].LikelyCause)
+	}
 }
 
 func TestDetectAnomaliesSkipsClustersWithOnlyOneSnapshot(t *testing.T) {

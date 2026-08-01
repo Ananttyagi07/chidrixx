@@ -31,20 +31,32 @@ export function AnomalyCard({ anomalies }: { anomalies: AnomalyPoint[] }) {
           {anomalies.map((a) => (
             <div
               key={a.cluster_id}
-              className="flex items-center justify-between gap-2 rounded-lg border border-[var(--status-critical)]/30 bg-[var(--status-critical)]/5 px-3 py-2"
+              className="rounded-lg border border-[var(--status-critical)]/30 bg-[var(--status-critical)]/5 px-3 py-2"
             >
-              <div className="flex items-center gap-2">
-                <IconTrendingUp className="h-4 w-4 text-[var(--status-critical)]" />
-                <div>
-                  <div className="text-xs font-semibold">{a.cluster_id}</div>
-                  <div className="text-[0.7rem] text-[var(--ink-muted)]">
-                    {formatINR(a.previous_cost_inr)} → {formatINR(a.current_cost_inr)}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <IconTrendingUp className="h-4 w-4 text-[var(--status-critical)]" />
+                  <div>
+                    <div className="text-xs font-semibold">{a.cluster_id}</div>
+                    <div className="text-[0.7rem] text-[var(--ink-muted)]">
+                      {formatINR(a.previous_cost_inr)} → {formatINR(a.current_cost_inr)}
+                    </div>
                   </div>
                 </div>
+                <span className="rounded-full bg-[var(--status-critical)]/15 px-2 py-0.5 text-xs font-semibold text-[var(--status-critical)]">
+                  {a.growth_ratio.toFixed(1)}x
+                </span>
               </div>
-              <span className="rounded-full bg-[var(--status-critical)]/15 px-2 py-0.5 text-xs font-semibold text-[var(--status-critical)]">
-                {a.growth_ratio.toFixed(1)}x
-              </span>
+              {a.likely_cause && (
+                <div className="mt-2 rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface-sunken)] px-2.5 py-1.5 text-[0.68rem] text-[var(--ink-secondary)]">
+                  A real Deployment event in{" "}
+                  <span className="font-mono">
+                    {a.likely_cause.namespace}/{a.likely_cause.name}
+                  </span>{" "}
+                  ({a.likely_cause.message}) happened shortly before this jump — worth checking,
+                  not proven causation.
+                </div>
+              )}
             </div>
           ))}
         </div>

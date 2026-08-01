@@ -32,6 +32,7 @@ type shipperFinding struct {
 type shipperRequest struct {
 	ClusterID string           `json:"cluster_id"`
 	Findings  []shipperFinding `json:"findings"`
+	Events    []DeployEvent    `json:"events"`
 }
 
 // Shipper posts the agent's current cumulative findings to a control
@@ -59,7 +60,7 @@ func NewShipper(url, clusterID, authToken string) *Shipper {
 // failure is returned, not fatal — the caller logs and keeps going, since
 // a control plane being briefly unreachable shouldn't stop local
 // reporting (CLI/HTML/metrics/alerts all keep working independently).
-func (s *Shipper) Ship(ctx context.Context, findings []*Finding) error {
+func (s *Shipper) Ship(ctx context.Context, findings []*Finding, events []DeployEvent) error {
 	if s.url == "" {
 		return nil
 	}
@@ -82,7 +83,7 @@ func (s *Shipper) Ship(ctx context.Context, findings []*Finding) error {
 		})
 	}
 
-	body, err := json.Marshal(shipperRequest{ClusterID: s.clusterID, Findings: wire})
+	body, err := json.Marshal(shipperRequest{ClusterID: s.clusterID, Findings: wire, Events: events})
 	if err != nil {
 		return fmt.Errorf("marshal ship request: %w", err)
 	}

@@ -61,11 +61,20 @@ export interface ClusterSummaryView {
   trend: CostTrendPoint[];
 }
 
+export interface DeployEvent {
+  namespace: string;
+  name: string;
+  reason: string;
+  message: string;
+  occurred_at: string;
+}
+
 export interface AnomalyPoint {
   cluster_id: string;
   previous_cost_inr: number;
   current_cost_inr: number;
   growth_ratio: number;
+  likely_cause?: DeployEvent;
 }
 
 export interface TeamSpend {
