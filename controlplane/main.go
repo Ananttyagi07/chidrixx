@@ -27,6 +27,10 @@ func main() {
 		runCreateUser(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "create-token" {
+		runCreateToken(os.Args[2:])
+		return
+	}
 
 	addr := flag.String("addr", ":8090", "address to serve the ingest API and dashboard on")
 	dbPath := flag.String("db", "controlplane.db", "path to the SQLite store")
@@ -202,4 +206,30 @@ func runCreateUser(args []string) {
 	}
 
 	fmt.Printf("Created %s user %q on tenant %d\n", *role, *username, *tenantID)
+}
+
+func runCreateToken(args []string) {
+	fs := flag.NewFlagSet("create-token", flag.ExitOnError)
+	dbPath := fs.String("db", "controlplane.db", "path to the SQLite store")
+	tenantID := fs.Int64("tenant-id", 0, "existing tenant ID to mint a new ingest token for (required)")
+	label := fs.String("label", "manual", "a label to remember what this token is for")
+	fs.Parse(args)
+
+	if *tenantID == 0 {
+		fmt.Fprintln(os.Stderr, "usage: controlplane create-token --tenant-id N [--label text] [--db path]")
+		os.Exit(2)
+	}
+
+	store, err := OpenStore(*dbPath)
+	if err != nil {
+		log.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	token, err := store.CreateAPIToken(*tenantID, *label)
+	if err != nil {
+		log.Fatalf("create token: %v", err)
+	}
+
+	fmt.Printf("New ingest token for tenant %d (shown once, put it in CHIDRIXX_AUTH_TOKEN on this tenant's agents): %s\n", *tenantID, token)
 }

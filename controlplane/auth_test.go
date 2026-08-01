@@ -46,6 +46,32 @@ func TestRequireAPITokenRejectsMissingOrWrongToken(t *testing.T) {
 	_ = realToken // used in the positive-path test below
 }
 
+func TestCreateAPITokenMintsARealWorkingSecondToken(t *testing.T) {
+	store := testStore(t)
+	tenantID, originalToken, err := store.CreateTenant("acme", "admin", "hunter2hunter2")
+	if err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+
+	newToken, err := store.CreateAPIToken(tenantID, "rotated")
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+	if newToken == originalToken {
+		t.Fatal("expected a genuinely new token, got the same value")
+	}
+
+	for _, tok := range []string{originalToken, newToken} {
+		got, err := store.AuthenticateAPIToken(tok)
+		if err != nil {
+			t.Fatalf("AuthenticateAPIToken(%q): %v", tok, err)
+		}
+		if got != tenantID {
+			t.Fatalf("token resolved to tenant %d, want %d", got, tenantID)
+		}
+	}
+}
+
 func TestRequireAPITokenResolvesRealTenant(t *testing.T) {
 	store := testStore(t)
 	tenantID, token, err := store.CreateTenant("acme", "admin", "hunter2hunter2")

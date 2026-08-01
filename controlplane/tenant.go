@@ -145,6 +145,26 @@ func (s *Store) CreateUser(tenantID int64, username, password, role string) erro
 	return nil
 }
 
+// CreateAPIToken issues a new ingest token for an existing tenant --
+// tokens are stored SHA-256 hashed (see hashToken), so there's no way to
+// recover a lost one; this mints a real new one instead, the same
+// operator-run path as CreateTenant's bootstrap token.
+func (s *Store) CreateAPIToken(tenantID int64, label string) (string, error) {
+	token, err := randomToken(24)
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := s.db.Exec(
+		`INSERT INTO api_tokens (tenant_id, token_hash, label, created_at) VALUES (?, ?, ?, ?)`,
+		tenantID, hashToken(token), label, time.Now().Unix(),
+	); err != nil {
+		return "", fmt.Errorf("insert api token: %w", err)
+	}
+
+	return token, nil
+}
+
 // TenantCount is used by main.go's bootstrap check -- if zero, this is a
 // brand-new install with nobody able to log in yet.
 func (s *Store) TenantCount() (int, error) {
