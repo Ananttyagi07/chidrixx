@@ -5,5 +5,5 @@ metadata:
   labels:
     {{- include "kharcha.labels" . | nindent 4 }}
 data:
-  aws.yaml: |
+  pricebook.yaml: |
     {{- toYaml .Values.pricebook | nindent 4 }}

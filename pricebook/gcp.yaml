@@ -1,0 +1,29 @@
+# Overridable price book (build manual §9.1 / §12). List-price defaults —
+# verify current per-region rates before trusting this for a real bill, and
+# swap in negotiated enterprise rates without touching code.
+#
+# Source: Google Cloud VPC network pricing (cloud.google.com/vpc/pricing),
+# standard tier / list pricing as of last_verified below. GCP publishes
+# network pricing per traffic *direction* (inter-zone, inter-region same
+# continent, internet egress) rather than per managed-service product the
+# way this price book's rate keys are shaped, so managed_service below
+# reuses the inter-zone rate as the closest real published figure — GCP
+# doesn't itemize a separate rate for e.g. Cloud SQL/Memorystore cross-zone
+# traffic, it's billed as ordinary inter-zone egress.
+cloud: gcp
+region: asia-south1
+last_verified: "2026-08-01"
+unit: per_gb_usd
+
+rates:
+  same_node: 0.0
+  same_az: 0.0
+  cross_az: 0.01            # inter-zone, same region
+  cross_region: 0.02        # inter-region, same continent (Asia-to-Asia)
+  managed_service: 0.01     # no separate published rate; billed as ordinary inter-zone egress
+  private_offcluster: 0.0
+  nat_egress: 0.045         # Cloud NAT: ~$0.045/GB processed (excludes the separate per-hour gateway charge)
+  internet_egress: 0.12     # standard tier, first tier, Asia-Pacific egress
+
+fx:
+  usd_to_inr: 84.0

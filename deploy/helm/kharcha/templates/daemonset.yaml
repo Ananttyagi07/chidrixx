@@ -22,7 +22,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - -bpf-object=/app/bpf/flow_cgroup.o
-            - -pricebook=/etc/kharcha/aws.yaml
+            - -pricebook=/etc/kharcha/pricebook.yaml
             - -html-out=/app/report.html
             - -metrics-addr=:{{ .Values.metricsPort }}
             - -k8s-refresh-interval={{ .Values.k8sRefreshInterval }}

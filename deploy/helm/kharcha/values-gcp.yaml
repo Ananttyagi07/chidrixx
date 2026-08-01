@@ -1,0 +1,26 @@
+# Real GCP price book override. Deploy a second real cluster on GCP with:
+#
+#   helm install kharcha ./deploy/helm/kharcha \
+#     -f deploy/helm/kharcha/values.yaml \
+#     -f deploy/helm/kharcha/values-gcp.yaml
+#
+# This is what makes "Spend by provider" on the control-plane dashboard a
+# genuine multi-cloud breakdown instead of a single 100% slice — every
+# agent reports the Cloud/Region from whichever price book it was deployed
+# with (see pricebook/gcp.yaml for rate sourcing/caveats).
+pricebook:
+  cloud: gcp
+  region: asia-south1
+  last_verified: "2026-08-01"
+  unit: per_gb_usd
+  rates:
+    same_node: 0.0
+    same_az: 0.0
+    cross_az: 0.01
+    cross_region: 0.02
+    managed_service: 0.01
+    private_offcluster: 0.0
+    nat_egress: 0.045
+    internet_egress: 0.12
+  fx:
+    usd_to_inr: 84.0
