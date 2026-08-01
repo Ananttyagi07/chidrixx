@@ -26,17 +26,17 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { id: "overview", label: "Overview", icon: IconGrid, real: true },
-  { id: "insights", label: "Insights", icon: IconBulb, real: false },
-  { id: "explorer", label: "Explorer", icon: IconSearch, real: false },
-  { id: "workloads", label: "Workloads", icon: IconLayers, real: false },
+  { id: "insights", label: "Insights", icon: IconBulb, real: true },
+  { id: "explorer", label: "Explorer", icon: IconSearch, real: true },
+  { id: "workloads", label: "Workloads", icon: IconLayers, real: true },
   { id: "costs", label: "Costs & Usage", icon: IconReceipt, real: true },
   { id: "budgets", label: "Budgets", icon: IconWallet, real: true },
   { id: "savings", label: "Savings Advisor", icon: IconShieldCheck, real: true },
   { id: "forecasting", label: "Forecasting", icon: IconTrendingUp, real: true },
   { id: "anomalies", label: "Anomalies", icon: IconBell, real: true },
-  { id: "reports", label: "Reports", icon: IconFile, real: false },
-  { id: "automations", label: "Automations", icon: IconGear, real: false },
-  { id: "settings", label: "Settings", icon: IconGear, real: false },
+  { id: "reports", label: "Reports", icon: IconFile, real: true },
+  { id: "automations", label: "Automations", icon: IconGear, real: true },
+  { id: "settings", label: "Settings", icon: IconGear, real: true },
 ];
 
 export function Sidebar({ active, onSelect }: { active: string; onSelect: (id: string) => void }) {

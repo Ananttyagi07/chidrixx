@@ -27,22 +27,3 @@ export function ComingSoonCard({ title, note }: { title: string; note?: string }
     </motion.div>
   );
 }
-
-export function ComingSoonPage({ title }: { title: string }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-      className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] py-24 text-center shadow-[var(--card-shadow)]"
-    >
-      <motion.div animate={{ y: [0, -6, 0] }} transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}>
-        <IconConstruction className="h-8 w-8 text-[var(--ink-muted)]" />
-      </motion.div>
-      <div className="text-lg font-semibold">{title}</div>
-      <div className="max-w-sm text-sm text-[var(--ink-muted)]">
-        This page isn't built yet — Overview is the only real page chidrixx has today.
-      </div>
-    </motion.div>
-  );
-}

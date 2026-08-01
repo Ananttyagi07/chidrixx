@@ -7,13 +7,19 @@ import { SpendTrendChart } from "./components/SpendTrendChart";
 import { DonutChart, type DonutSlice } from "./components/DonutChart";
 import { ClusterCard } from "./components/ClusterCard";
 import { TopFixesTable } from "./components/TopFixesTable";
-import { ComingSoonCard, ComingSoonPage } from "./components/ComingSoon";
+import { ComingSoonCard } from "./components/ComingSoon";
 import { BudgetCard } from "./components/BudgetCard";
 import { AnomalyCard } from "./components/AnomalyCard";
 import { TrendProjectionCard } from "./components/TrendProjectionCard";
 import { CostsUsagePage } from "./components/CostsUsagePage";
 import { AnomaliesPage, BudgetsPage, ForecastingPage, SavingsAdvisorPage } from "./components/FeaturePages";
-import { Sidebar, NAV_ITEMS } from "./components/Sidebar";
+import { WorkloadsPage } from "./components/WorkloadsPage";
+import { ExplorerPage } from "./components/ExplorerPage";
+import { ReportsPage } from "./components/ReportsPage";
+import { InsightsPage } from "./components/InsightsPage";
+import { AutomationsPage } from "./components/AutomationsPage";
+import { SettingsPage } from "./components/SettingsPage";
+import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { LandingPage } from "./components/LandingPage";
 import { SectionTitle } from "./components/SectionTitle";
@@ -21,6 +27,20 @@ import { AnimatedNumber, AnimatedRange } from "./components/AnimatedNumber";
 import { CATEGORICAL, PATH_CLASS_COLOR, PATH_CLASS_LABEL, STATUS } from "./palette";
 import { container, item } from "./motion";
 import { formatBytes, formatINR } from "./format";
+
+// Pages that need the shared dashboard-summary fetch, keyed by nav id.
+// costs/explorer/workloads fetch their own data (the full findings list,
+// not the summary) so they're handled as separate branches below.
+const DATA_PAGES: Record<string, (data: DashboardSummary) => React.ReactNode> = {
+  budgets: (data) => <BudgetsPage data={data} />,
+  anomalies: (data) => <AnomaliesPage data={data} />,
+  forecasting: (data) => <ForecastingPage data={data} />,
+  savings: (data) => <SavingsAdvisorPage data={data} />,
+  insights: (data) => <InsightsPage data={data} />,
+  reports: (data) => <ReportsPage data={data} />,
+  automations: (data) => <AutomationsPage data={data} />,
+  settings: (data) => <SettingsPage data={data} />,
+};
 
 function Panel({
   title,
@@ -143,8 +163,6 @@ function Dashboard() {
     return data.top_fixes.reduce((s, f) => s + f.cost_high_inr, 0);
   }, [data]);
 
-  const navLabel = NAV_ITEMS.find((n) => n.id === active)?.label ?? "Overview";
-
   return (
     <div className="relative flex h-screen overflow-hidden bg-[var(--page)]">
       <motion.div
@@ -166,7 +184,15 @@ function Dashboard() {
             <motion.div key="costs" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <CostsUsagePage />
             </motion.div>
-          ) : active === "budgets" || active === "anomalies" || active === "forecasting" || active === "savings" ? (
+          ) : active === "explorer" ? (
+            <motion.div key="explorer" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <ExplorerPage />
+            </motion.div>
+          ) : active === "workloads" ? (
+            <motion.div key="workloads" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <WorkloadsPage />
+            </motion.div>
+          ) : active in DATA_PAGES ? (
             <motion.div key={active} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               {!data && !error && <Skeleton />}
               {error && (
@@ -174,14 +200,7 @@ function Dashboard() {
                   Couldn't load dashboard data: {error}
                 </div>
               )}
-              {data && active === "budgets" && <BudgetsPage data={data} />}
-              {data && active === "anomalies" && <AnomaliesPage data={data} />}
-              {data && active === "forecasting" && <ForecastingPage data={data} />}
-              {data && active === "savings" && <SavingsAdvisorPage data={data} />}
-            </motion.div>
-          ) : active !== "overview" ? (
-            <motion.div key="soon" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <ComingSoonPage title={navLabel} />
+              {data && DATA_PAGES[active](data)}
             </motion.div>
           ) : (
             <motion.div key="overview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
