@@ -68,10 +68,22 @@ export interface AnomalyPoint {
   growth_ratio: number;
 }
 
+export interface TeamSpend {
+  team: string;
+  cost_high_inr: number;
+  finding_count: number;
+}
+
+export interface TeamOwnership {
+  namespace: string;
+  team: string;
+}
+
 export interface DashboardSummary {
   summary: Summary;
   spend_by_class: ClassSpend[];
   spend_by_cloud: CloudSpend[];
+  spend_by_team: TeamSpend[];
   trend: CostTrendPoint[];
   clusters: ClusterSummaryView[];
   top_fixes: FindingRow[];

@@ -50,6 +50,7 @@ func main() {
 	api.HandleFunc("/api/v1/findings", requireSession(store, handleFindingsAPI(store)))
 	api.HandleFunc("/api/v1/dashboard-summary", requireSession(store, handleDashboardSummary(store)))
 	api.HandleFunc("/api/v1/budget", requireSession(store, budgetRoute(store)))
+	api.HandleFunc("/api/v1/teams", requireSession(store, teamsRoute(store)))
 	api.HandleFunc("/api/v1/auth/me", requireSession(store, handleMe))
 
 	mux := http.NewServeMux()
@@ -69,6 +70,20 @@ func budgetRoute(store *Store) http.HandlerFunc {
 	adminOnly := requireAdmin(handleBudget(store))
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
+			adminOnly(w, r)
+			return
+		}
+		get(w, r)
+	}
+}
+
+// teamsRoute applies requireAdmin only to the write side of handleTeams --
+// a viewer can still see the team mapping, just not change it.
+func teamsRoute(store *Store) http.HandlerFunc {
+	get := handleTeams(store)
+	adminOnly := requireAdmin(handleTeams(store))
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost || r.Method == http.MethodDelete {
 			adminOnly(w, r)
 			return
 		}

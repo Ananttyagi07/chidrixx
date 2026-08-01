@@ -23,6 +23,7 @@ type dashboardSummaryResponse struct {
 	Summary      Summary              `json:"summary"`
 	SpendByClass []ClassSpend         `json:"spend_by_class"`
 	SpendByCloud []CloudSpend         `json:"spend_by_cloud"`
+	SpendByTeam  []TeamSpend          `json:"spend_by_team"`
 	Trend        []CostTrendPoint     `json:"trend"`
 	Clusters     []clusterSummaryView `json:"clusters"`
 	TopFixes     []FindingRow         `json:"top_fixes"`
@@ -90,6 +91,14 @@ func handleDashboardSummary(store *Store) http.HandlerFunc {
 			return
 		}
 
+		teamOwnership, err := store.ListTeamOwnership(tenantID)
+		if err != nil {
+			log.Printf("dashboard-summary: team ownership: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		spendByTeam := computeSpendByTeam(findings, teamOwnership)
+
 		topFixes := make([]FindingRow, 0, len(findings))
 		for _, f := range findings {
 			if f.FixHint != "" {
@@ -121,6 +130,7 @@ func handleDashboardSummary(store *Store) http.HandlerFunc {
 			Summary:      summary,
 			SpendByClass: spendByClass,
 			SpendByCloud: spendByCloud,
+			SpendByTeam:  spendByTeam,
 			Trend:        trend,
 			Clusters:     clusterViews,
 			TopFixes:     topFixes,

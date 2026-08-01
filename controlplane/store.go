@@ -86,6 +86,26 @@ CREATE TABLE IF NOT EXISTS sessions (
 	created_at INTEGER NOT NULL,
 	expires_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS team_ownership (
+	tenant_id  INTEGER NOT NULL,
+	namespace  TEXT NOT NULL,
+	team       TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY (tenant_id, namespace)
+);
+
+CREATE TABLE IF NOT EXISTS deploy_event (
+	id          INTEGER PRIMARY KEY AUTOINCREMENT,
+	tenant_id   INTEGER NOT NULL,
+	cluster_id  TEXT NOT NULL,
+	namespace   TEXT NOT NULL,
+	name        TEXT NOT NULL,
+	reason      TEXT NOT NULL,
+	message     TEXT,
+	occurred_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_deploy_event_tenant_cluster_time ON deploy_event(tenant_id, cluster_id, occurred_at);
 `
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()

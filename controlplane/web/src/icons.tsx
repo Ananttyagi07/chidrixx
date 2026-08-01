@@ -72,6 +72,17 @@ export function IconShieldCheck({ className }: IconProps) {
   );
 }
 
+export function IconUsers({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" strokeWidth={1.6} className={`${base} ${className ?? ""}`}>
+      <circle cx="7.5" cy="6.5" r="2.5" />
+      <path d="M2.5 16.5c0-2.8 2.2-4.5 5-4.5s5 1.7 5 4.5" />
+      <circle cx="14.5" cy="7.5" r="2" />
+      <path d="M13 12.3c1.9.4 3.5 1.8 3.5 4.2" />
+    </svg>
+  );
+}
+
 export function IconTrendingUp({ className }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" strokeWidth={1.6} className={`${base} ${className ?? ""}`}>

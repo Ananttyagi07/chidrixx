@@ -18,6 +18,7 @@ import { ReportsPage } from "./components/ReportsPage";
 import { InsightsPage } from "./components/InsightsPage";
 import { AutomationsPage } from "./components/AutomationsPage";
 import { SettingsPage } from "./components/SettingsPage";
+import { TeamsPage } from "./components/TeamsPage";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { LandingPage } from "./components/LandingPage";
@@ -44,6 +45,7 @@ const DATA_PAGES: Record<string, (data: DashboardSummary) => React.ReactNode> = 
   reports: (data) => <ReportsPage data={data} />,
   automations: (data) => <AutomationsPage data={data} />,
   settings: (data) => <SettingsPage data={data} />,
+  teams: (data) => <TeamsPage data={data} />,
 };
 
 function Panel({

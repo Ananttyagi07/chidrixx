@@ -13,6 +13,7 @@ import {
   IconSearch,
   IconShieldCheck,
   IconTrendingUp,
+  IconUsers,
   IconWallet,
 } from "../icons";
 
@@ -30,6 +31,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "insights", label: "Insights", icon: IconBulb, real: true },
   { id: "explorer", label: "Explorer", icon: IconSearch, real: true },
   { id: "workloads", label: "Workloads", icon: IconLayers, real: true },
+  { id: "teams", label: "Teams", icon: IconUsers, real: true },
   { id: "costs", label: "Costs & Usage", icon: IconReceipt, real: true },
   { id: "budgets", label: "Budgets", icon: IconWallet, real: true },
   { id: "savings", label: "Savings Advisor", icon: IconShieldCheck, real: true },
