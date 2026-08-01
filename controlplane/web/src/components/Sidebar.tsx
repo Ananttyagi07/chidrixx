@@ -29,7 +29,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "insights", label: "Insights", icon: IconBulb, real: false },
   { id: "explorer", label: "Explorer", icon: IconSearch, real: false },
   { id: "workloads", label: "Workloads", icon: IconLayers, real: false },
-  { id: "costs", label: "Costs & Usage", icon: IconReceipt, real: false },
+  { id: "costs", label: "Costs & Usage", icon: IconReceipt, real: true },
   { id: "budgets", label: "Budgets", icon: IconWallet, real: false },
   { id: "savings", label: "Savings Advisor", icon: IconShieldCheck, real: false },
   { id: "forecasting", label: "Forecasting", icon: IconTrendingUp, real: false },

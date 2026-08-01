@@ -5,13 +5,15 @@ import { PATH_CLASS_LABEL } from "../palette";
 import { formatINR } from "../format";
 import { ConfidenceChip } from "./ConfidenceChip";
 
-export function TopFixesTable({ findings }: { findings: FindingRow[] }) {
+export function TopFixesTable({
+  findings,
+  emptyMessage = "No flagged flows yet — nothing wasteful found (or nothing shipped yet).",
+}: {
+  findings: FindingRow[];
+  emptyMessage?: string;
+}) {
   if (findings.length === 0) {
-    return (
-      <div className="py-8 text-center text-sm text-[var(--ink-muted)]">
-        No flagged flows yet — nothing wasteful found (or nothing shipped yet).
-      </div>
-    );
+    return <div className="py-8 text-center text-sm text-[var(--ink-muted)]">{emptyMessage}</div>;
   }
 
   return (

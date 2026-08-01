@@ -11,6 +11,7 @@ import { ComingSoonCard, ComingSoonPage } from "./components/ComingSoon";
 import { BudgetCard } from "./components/BudgetCard";
 import { AnomalyCard } from "./components/AnomalyCard";
 import { TrendProjectionCard } from "./components/TrendProjectionCard";
+import { CostsUsagePage } from "./components/CostsUsagePage";
 import { Sidebar, NAV_ITEMS } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { LandingPage } from "./components/LandingPage";
@@ -160,7 +161,11 @@ function Dashboard() {
         <Topbar data={data} />
 
         <AnimatePresence mode="wait">
-          {active !== "overview" ? (
+          {active === "costs" ? (
+            <motion.div key="costs" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <CostsUsagePage />
+            </motion.div>
+          ) : active !== "overview" ? (
             <motion.div key="soon" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <ComingSoonPage title={navLabel} />
             </motion.div>
