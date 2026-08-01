@@ -3,6 +3,7 @@ import type { DashboardSummary } from "../types";
 import { BudgetCard } from "./BudgetCard";
 import { AnomalyCard } from "./AnomalyCard";
 import { TrendProjectionCard } from "./TrendProjectionCard";
+import { PredictiveDriverCard } from "./PredictiveDriverCard";
 import { TopFixesTable } from "./TopFixesTable";
 import { AnimatedNumber } from "./AnimatedNumber";
 import { formatINR } from "../format";
@@ -55,8 +56,9 @@ export function ForecastingPage({ data }: { data: DashboardSummary }) {
         data is cumulative snapshots at whatever cadence agents ship at, not a fixed time series.
         The shaded band is a real 80% interval computed from the model's own residual error.
       </p>
-      <div className="max-w-2xl">
+      <div className="flex max-w-2xl flex-col gap-3">
         <TrendProjectionCard points={data.trend} />
+        <PredictiveDriverCard trend={data.trend} />
       </div>
     </motion.div>
   );
