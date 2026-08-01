@@ -29,6 +29,8 @@ import { formatBytes, formatINR } from "./format";
 import { ClusterTopologyCard } from "./components/ClusterTopologyCard";
 import { SpendByProviderCard } from "./components/SpendByProviderCard";
 import { CarbonFootprintCard } from "./components/CarbonFootprintCard";
+import { LoginPage } from "./components/LoginPage";
+import { SessionContext, type Session } from "./session";
 
 // Pages that need the shared dashboard-summary fetch, keyed by nav id.
 // costs/explorer/workloads fetch their own data (the full findings list,
@@ -92,7 +94,7 @@ function Skeleton() {
   );
 }
 
-function Dashboard() {
+function Dashboard({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState("overview");
@@ -166,6 +168,7 @@ function Dashboard() {
   }, [data]);
 
   return (
+    <SessionContext.Provider value={session}>
     <div className="relative flex h-screen overflow-hidden bg-[var(--page)]">
       <motion.div
         style={{ y: orb1Y }}
@@ -176,7 +179,7 @@ function Dashboard() {
         className="pointer-events-none absolute right-0 top-1/3 h-72 w-72 rounded-full bg-[var(--series-blue)] opacity-[0.05] blur-3xl"
       />
 
-      <Sidebar active={active} onSelect={setActive} />
+      <Sidebar active={active} onSelect={setActive} session={session} onLogout={onLogout} />
 
       <main ref={scrollRef} className="relative z-10 flex-1 overflow-y-auto p-6">
         <Topbar data={data} />
@@ -308,21 +311,51 @@ function Dashboard() {
         </AnimatePresence>
       </main>
     </div>
+    </SessionContext.Provider>
   );
 }
 
 export default function App() {
-  const [entered, setEntered] = useState(false);
+  const [phase, setPhase] = useState<"checking" | "landing" | "login" | "authed">("checking");
+  const [session, setSession] = useState<Session | null>(null);
+
+  useEffect(() => {
+    fetch("/api/v1/auth/me")
+      .then((r) => {
+        if (!r.ok) throw new Error("not logged in");
+        return r.json();
+      })
+      .then((s: Session) => {
+        setSession(s);
+        setPhase("authed");
+      })
+      .catch(() => setPhase("landing"));
+  }, []);
+
+  function handleLoggedIn(s: Session) {
+    setSession(s);
+    setPhase("authed");
+  }
+
+  async function handleLogout() {
+    await fetch("/api/v1/auth/logout", { method: "POST" }).catch(() => {});
+    setSession(null);
+    setPhase("landing");
+  }
 
   return (
     <AnimatePresence mode="wait">
-      {!entered ? (
+      {phase === "checking" ? null : phase === "landing" ? (
         <motion.div key="landing" exit={{ opacity: 0 }}>
-          <LandingPage onEnter={() => setEntered(true)} />
+          <LandingPage onEnter={() => setPhase("login")} />
+        </motion.div>
+      ) : phase === "login" ? (
+        <motion.div key="login" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <LoginPage onLoggedIn={handleLoggedIn} />
         </motion.div>
       ) : (
         <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-          <Dashboard />
+          <Dashboard session={session!} onLogout={handleLogout} />
         </motion.div>
       )}
     </AnimatePresence>

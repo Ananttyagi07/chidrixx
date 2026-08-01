@@ -8,14 +8,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- /*
-Resolves to the Secret name actually backing CHIDRIXX_AUTH_TOKEN: the
-user-supplied auth.tokenSecretName if set, else the chart-managed
-generated secret if auth.generate is true, else empty (unauthenticated).
+Resolves to the Secret name backing CHIDRIXX_ADMIN_PASSWORD: the
+user-supplied auth.adminPasswordSecretName if set, else the chart-managed
+generated secret if auth.generate is true, else empty (the control plane
+binary generates and logs its own random password on first boot instead).
 */ -}}
-{{- define "chidrixx-controlplane.authSecretName" -}}
-{{- if .Values.auth.tokenSecretName -}}
-{{ .Values.auth.tokenSecretName }}
+{{- define "chidrixx-controlplane.adminPasswordSecretName" -}}
+{{- if .Values.auth.adminPasswordSecretName -}}
+{{ .Values.auth.adminPasswordSecretName }}
 {{- else if .Values.auth.generate -}}
-{{ include "chidrixx-controlplane.fullname" . }}-auth-token
+{{ include "chidrixx-controlplane.fullname" . }}-admin-password
 {{- end -}}
 {{- end -}}

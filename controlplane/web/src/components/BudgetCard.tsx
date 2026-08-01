@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { cardMotion } from "../motion";
 import { formatINR } from "../format";
+import { useSession } from "../session";
 
 interface BudgetResponse {
   budget_inr: number;
@@ -12,6 +13,8 @@ interface BudgetResponse {
 // "AI-recommended budget," just what was typed in, persisted server-side
 // (controlplane/budget_api.go).
 export function BudgetCard({ spentINR }: { spentINR: number }) {
+  const { role } = useSession();
+  const canEdit = role === "admin";
   const [budget, setBudget] = useState<BudgetResponse | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -88,15 +91,19 @@ export function BudgetCard({ spentINR }: { spentINR: number }) {
       ) : !budget.is_set ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
           <div className="text-sm text-[var(--ink-muted)]">No budget set yet.</div>
-          <button
-            onClick={() => {
-              setDraft("");
-              setEditing(true);
-            }}
-            className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white"
-          >
-            Set a budget
-          </button>
+          {canEdit ? (
+            <button
+              onClick={() => {
+                setDraft("");
+                setEditing(true);
+              }}
+              className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white"
+            >
+              Set a budget
+            </button>
+          ) : (
+            <div className="text-xs text-[var(--ink-muted)]">Ask an admin to set one.</div>
+          )}
         </div>
       ) : (
         <div className="flex flex-1 flex-col justify-center gap-2">
@@ -117,15 +124,17 @@ export function BudgetCard({ spentINR }: { spentINR: number }) {
             <span className={`text-xs ${over ? "text-[var(--status-critical)]" : "text-[var(--ink-secondary)]"}`}>
               {pct.toFixed(1)}% {over ? "— over budget" : "used"}
             </span>
-            <button
-              onClick={() => {
-                setDraft(String(budget.budget_inr));
-                setEditing(true);
-              }}
-              className="text-xs text-[var(--accent)] hover:underline"
-            >
-              edit
-            </button>
+            {canEdit && (
+              <button
+                onClick={() => {
+                  setDraft(String(budget.budget_inr));
+                  setEditing(true);
+                }}
+                className="text-xs text-[var(--accent)] hover:underline"
+              >
+                edit
+              </button>
+            )}
           </div>
         </div>
       )}

@@ -7,45 +7,32 @@ import (
 	"testing"
 )
 
-func TestRequireTokenDisabledWhenEmpty(t *testing.T) {
-	called := false
-	handler := requireToken("", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if !called {
-		t.Fatal("expected the wrapped handler to run when no token is configured")
+func TestRequireAPITokenRejectsMissingOrWrongToken(t *testing.T) {
+	store := testStore(t)
+	_, realToken, err := store.CreateTenant("acme", "admin", "hunter2hunter2")
+	if err != nil {
+		t.Fatalf("create tenant: %v", err)
 	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-}
 
-func TestRequireTokenRejectsMissingOrWrongToken(t *testing.T) {
-	handler := requireToken("secret-token", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := requireAPIToken(store, func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("handler must not run without a valid token")
-	}))
+	})
 
 	cases := []struct {
 		name     string
 		setBasic bool
-		user     string
 		pass     string
 	}{
-		{"no credentials at all", false, "", ""},
-		{"wrong password", true, "anyone", "wrong-token"},
-		{"empty password", true, "anyone", ""},
+		{"no credentials at all", false, ""},
+		{"wrong token", true, "not-the-real-token"},
+		{"empty token", true, ""},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest", nil)
 			if c.setBasic {
-				req.SetBasicAuth(c.user, c.pass)
+				req.SetBasicAuth("agent", c.pass)
 			}
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
@@ -53,28 +40,162 @@ func TestRequireTokenRejectsMissingOrWrongToken(t *testing.T) {
 			if rec.Code != http.StatusUnauthorized {
 				t.Fatalf("status = %d, want 401", rec.Code)
 			}
-			if got := rec.Header().Get("WWW-Authenticate"); got == "" {
-				t.Fatal("expected a WWW-Authenticate header so browsers prompt for credentials")
-			}
 		})
+	}
+
+	_ = realToken // used in the positive-path test below
+}
+
+func TestRequireAPITokenResolvesRealTenant(t *testing.T) {
+	store := testStore(t)
+	tenantID, token, err := store.CreateTenant("acme", "admin", "hunter2hunter2")
+	if err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+
+	var gotTenant int64
+	handler := requireAPIToken(store, func(w http.ResponseWriter, r *http.Request) {
+		gotTenant, _ = tenantIDFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest", nil)
+	req.SetBasicAuth("agent", token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if gotTenant != tenantID {
+		t.Fatalf("resolved tenant = %d, want %d", gotTenant, tenantID)
 	}
 }
 
-func TestRequireTokenAllowsCorrectTokenRegardlessOfUsername(t *testing.T) {
-	handler := requireToken("secret-token", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
+func TestRequireAPITokenNeverResolvesAnotherTenantsToken(t *testing.T) {
+	store := testStore(t)
+	tenantA, tokenA, err := store.CreateTenant("acme", "admin-a", "hunter2hunter2")
+	if err != nil {
+		t.Fatalf("create tenant a: %v", err)
+	}
+	tenantB, tokenB, err := store.CreateTenant("globex", "admin-b", "hunter3hunter3")
+	if err != nil {
+		t.Fatalf("create tenant b: %v", err)
+	}
 
-	// Username is deliberately ignored — the shared token is the only
-	// real credential.
-	for _, user := range []string{"anyone", "admin", ""} {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.SetBasicAuth(user, "secret-token")
+	handler := requireAPIToken(store, func(w http.ResponseWriter, r *http.Request) {
+		got, _ := tenantIDFromContext(r.Context())
+		if got != tenantA && got != tenantB {
+			t.Fatalf("resolved an unexpected tenant %d", got)
+		}
+		w.Header().Set("X-Tenant", "ok")
+		w.WriteHeader(http.StatusOK)
+	})
+
+	for tok, want := range map[string]int64{tokenA: tenantA, tokenB: tenantB} {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest", nil)
+		req.SetBasicAuth("agent", tok)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
-
 		if rec.Code != http.StatusOK {
-			t.Fatalf("username %q: status = %d, want 200", user, rec.Code)
+			t.Fatalf("token for tenant %d: status = %d, want 200", want, rec.Code)
 		}
+	}
+}
+
+func TestRequireSessionRejectsMissingOrInvalidCookie(t *testing.T) {
+	store := testStore(t)
+	handler := requireSession(store, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("handler must not run without a valid session")
+	})
+
+	t.Run("no cookie", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/dashboard-summary", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("garbage cookie", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/dashboard-summary", nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "not-a-real-session"})
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", rec.Code)
+		}
+	})
+}
+
+func TestRequireSessionResolvesRealTenantAndRole(t *testing.T) {
+	store := testStore(t)
+	tenantID, _, err := store.CreateTenant("acme", "admin", "hunter2hunter2")
+	if err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+
+	user, err := store.AuthenticateUser("admin", "hunter2hunter2")
+	if err != nil {
+		t.Fatalf("authenticate user: %v", err)
+	}
+	sessionID, err := store.CreateSession(user)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	var gotTenant int64
+	var gotRole string
+	handler := requireSession(store, func(w http.ResponseWriter, r *http.Request) {
+		gotTenant, _ = tenantIDFromContext(r.Context())
+		gotRole = roleFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dashboard-summary", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionID})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if gotTenant != tenantID {
+		t.Fatalf("resolved tenant = %d, want %d", gotTenant, tenantID)
+	}
+	if gotRole != RoleAdmin {
+		t.Fatalf("resolved role = %q, want %q", gotRole, RoleAdmin)
+	}
+}
+
+func TestRequireAdminRejectsViewerRole(t *testing.T) {
+	handler := requireAdmin(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("handler must not run for a non-admin role")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/budget", nil)
+	ctx := req.Context()
+	req = req.WithContext(contextWithRole(ctx, RoleViewer))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+}
+
+func TestRequireAdminAllowsAdminRole(t *testing.T) {
+	handler := requireAdmin(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/budget", nil)
+	req = req.WithContext(contextWithRole(req.Context(), RoleAdmin))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 }

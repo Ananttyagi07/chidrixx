@@ -29,7 +29,13 @@ func handleIngest(store *Store) http.HandlerFunc {
 			return
 		}
 
-		if err := store.Ingest(req.ClusterID, req.Findings); err != nil {
+		tenantID, ok := tenantIDFromContext(r.Context())
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		if err := store.Ingest(tenantID, req.ClusterID, req.Findings); err != nil {
 			log.Printf("ingest %s: %v", req.ClusterID, err)
 			http.Error(w, "ingest failed", http.StatusInternalServerError)
 			return
@@ -43,7 +49,13 @@ func handleIngest(store *Store) http.HandlerFunc {
 // anything other than the built-in HTML dashboard to consume (FR-I2).
 func handleFindingsAPI(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		findings, err := store.LatestFindings(500)
+		tenantID, ok := tenantIDFromContext(r.Context())
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		findings, err := store.LatestFindings(tenantID, 500)
 		if err != nil {
 			log.Printf("query findings: %v", err)
 			http.Error(w, "query failed", http.StatusInternalServerError)

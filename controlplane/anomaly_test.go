@@ -8,26 +8,27 @@ import (
 
 func TestDetectAnomaliesFlagsGrowthAboveThreshold(t *testing.T) {
 	s := testStore(t)
+	tenantID := testTenant(t, s)
 
 	// cluster-a: 1 -> 5, a 5x jump, should be flagged.
-	if err := s.Ingest("cluster-a", []Finding{{Source: "ns/a", CostHighINR: 1}}); err != nil {
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{{Source: "ns/a", CostHighINR: 1}}); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 	time.Sleep(1100 * time.Millisecond)
-	if err := s.Ingest("cluster-a", []Finding{{Source: "ns/a", CostHighINR: 5}}); err != nil {
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{{Source: "ns/a", CostHighINR: 5}}); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 
 	// cluster-b: 10 -> 12, only 1.2x, should not be flagged.
-	if err := s.Ingest("cluster-b", []Finding{{Source: "ns/b", CostHighINR: 10}}); err != nil {
+	if err := s.Ingest(tenantID, "cluster-b", []Finding{{Source: "ns/b", CostHighINR: 10}}); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 	time.Sleep(1100 * time.Millisecond)
-	if err := s.Ingest("cluster-b", []Finding{{Source: "ns/b", CostHighINR: 12}}); err != nil {
+	if err := s.Ingest(tenantID, "cluster-b", []Finding{{Source: "ns/b", CostHighINR: 12}}); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	anomalies, err := detectAnomalies(s)
+	anomalies, err := detectAnomalies(s, tenantID)
 	if err != nil {
 		t.Fatalf("detectAnomalies: %v", err)
 	}
@@ -43,12 +44,13 @@ func TestDetectAnomaliesFlagsGrowthAboveThreshold(t *testing.T) {
 
 func TestDetectAnomaliesSkipsClustersWithOnlyOneSnapshot(t *testing.T) {
 	s := testStore(t)
+	tenantID := testTenant(t, s)
 
-	if err := s.Ingest("cluster-a", []Finding{{Source: "ns/a", CostHighINR: 100}}); err != nil {
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{{Source: "ns/a", CostHighINR: 100}}); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	anomalies, err := detectAnomalies(s)
+	anomalies, err := detectAnomalies(s, tenantID)
 	if err != nil {
 		t.Fatalf("detectAnomalies: %v", err)
 	}
@@ -60,16 +62,17 @@ func TestDetectAnomaliesSkipsClustersWithOnlyOneSnapshot(t *testing.T) {
 
 func TestDetectAnomaliesSkipsZeroBaseline(t *testing.T) {
 	s := testStore(t)
+	tenantID := testTenant(t, s)
 
-	if err := s.Ingest("cluster-a", []Finding{{Source: "ns/a", CostHighINR: 0}}); err != nil {
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{{Source: "ns/a", CostHighINR: 0}}); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 	time.Sleep(1100 * time.Millisecond)
-	if err := s.Ingest("cluster-a", []Finding{{Source: "ns/a", CostHighINR: 50}}); err != nil {
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{{Source: "ns/a", CostHighINR: 50}}); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	anomalies, err := detectAnomalies(s)
+	anomalies, err := detectAnomalies(s, tenantID)
 	if err != nil {
 		t.Fatalf("detectAnomalies: %v", err)
 	}

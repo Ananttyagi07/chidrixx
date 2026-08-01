@@ -3,16 +3,25 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
 
+// withTenant simulates what requireSession would have already done by the
+// time a handler runs -- these tests exercise handleBudget directly, below
+// the auth middleware, so they set up its context precondition by hand.
+func withTenant(r *http.Request, tenantID int64) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), ctxTenantID, tenantID))
+}
+
 func TestHandleBudgetUnsetByDefault(t *testing.T) {
 	store := testStore(t)
+	tenantID := testTenant(t, store)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/budget", nil)
+	req := withTenant(httptest.NewRequest(http.MethodGet, "/api/v1/budget", nil), tenantID)
 	rec := httptest.NewRecorder()
 	handleBudget(store)(rec, req)
 
@@ -32,9 +41,10 @@ func TestHandleBudgetUnsetByDefault(t *testing.T) {
 
 func TestHandleBudgetSetThenGet(t *testing.T) {
 	store := testStore(t)
+	tenantID := testTenant(t, store)
 
 	body, _ := json.Marshal(setBudgetRequest{BudgetINR: 500})
-	postReq := httptest.NewRequest(http.MethodPost, "/api/v1/budget", bytes.NewReader(body))
+	postReq := withTenant(httptest.NewRequest(http.MethodPost, "/api/v1/budget", bytes.NewReader(body)), tenantID)
 	postRec := httptest.NewRecorder()
 	handleBudget(store)(postRec, postReq)
 
@@ -42,7 +52,7 @@ func TestHandleBudgetSetThenGet(t *testing.T) {
 		t.Fatalf("POST status = %d, want 200; body: %s", postRec.Code, postRec.Body.String())
 	}
 
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/budget", nil)
+	getReq := withTenant(httptest.NewRequest(http.MethodGet, "/api/v1/budget", nil), tenantID)
 	getRec := httptest.NewRecorder()
 	handleBudget(store)(getRec, getReq)
 
@@ -58,9 +68,10 @@ func TestHandleBudgetSetThenGet(t *testing.T) {
 
 func TestHandleBudgetRejectsNegative(t *testing.T) {
 	store := testStore(t)
+	tenantID := testTenant(t, store)
 
 	body, _ := json.Marshal(setBudgetRequest{BudgetINR: -10})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/budget", bytes.NewReader(body))
+	req := withTenant(httptest.NewRequest(http.MethodPost, "/api/v1/budget", bytes.NewReader(body)), tenantID)
 	rec := httptest.NewRecorder()
 	handleBudget(store)(rec, req)
 
@@ -71,12 +82,50 @@ func TestHandleBudgetRejectsNegative(t *testing.T) {
 
 func TestHandleBudgetRejectsWrongMethod(t *testing.T) {
 	store := testStore(t)
+	tenantID := testTenant(t, store)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/budget", nil)
+	req := withTenant(httptest.NewRequest(http.MethodDelete, "/api/v1/budget", nil), tenantID)
 	rec := httptest.NewRecorder()
 	handleBudget(store)(rec, req)
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+}
+
+func TestHandleBudgetRejectsMissingTenantContext(t *testing.T) {
+	store := testStore(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/budget", nil)
+	rec := httptest.NewRecorder()
+	handleBudget(store)(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 when no tenant is resolved", rec.Code)
+	}
+}
+
+func TestBudgetRouteRequiresAdminForPost(t *testing.T) {
+	store := testStore(t)
+	tenantID := testTenant(t, store)
+	route := budgetRoute(store)
+
+	body, _ := json.Marshal(setBudgetRequest{BudgetINR: 500})
+	req := withTenant(httptest.NewRequest(http.MethodPost, "/api/v1/budget", bytes.NewReader(body)), tenantID)
+	req = req.WithContext(contextWithRole(req.Context(), RoleViewer))
+	rec := httptest.NewRecorder()
+	route(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for a viewer POSTing a budget", rec.Code)
+	}
+
+	req2 := withTenant(httptest.NewRequest(http.MethodGet, "/api/v1/budget", nil), tenantID)
+	req2 = req2.WithContext(contextWithRole(req2.Context(), RoleViewer))
+	rec2 := httptest.NewRecorder()
+	route(rec2, req2)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200 for a viewer reading the budget", rec2.Code)
 	}
 }

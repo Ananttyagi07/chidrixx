@@ -24,8 +24,8 @@ type Anomaly struct {
 // A cluster with fewer than two snapshots ever ingested has nothing to
 // compare against and is silently skipped -- not flagged, not assumed
 // normal, just not enough history yet to say either way.
-func detectAnomalies(store *Store) ([]Anomaly, error) {
-	clusters, err := store.Clusters()
+func detectAnomalies(store *Store, tenantID int64) ([]Anomaly, error) {
+	clusters, err := store.Clusters(tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("list clusters: %w", err)
 	}
@@ -33,7 +33,7 @@ func detectAnomalies(store *Store) ([]Anomaly, error) {
 	anomalies := make([]Anomaly, 0)
 
 	for _, c := range clusters {
-		trend, err := store.CostTrend(c.ClusterID, 2)
+		trend, err := store.CostTrend(tenantID, c.ClusterID, 2)
 		if err != nil {
 			return nil, fmt.Errorf("cost trend for %s: %w", c.ClusterID, err)
 		}

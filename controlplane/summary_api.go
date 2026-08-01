@@ -34,28 +34,34 @@ type dashboardSummaryResponse struct {
 // the SPA needs all of it to paint its first frame.
 func handleDashboardSummary(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		summary, err := store.Summary()
+		tenantID, ok := tenantIDFromContext(r.Context())
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		summary, err := store.Summary(tenantID)
 		if err != nil {
 			log.Printf("dashboard-summary: summary: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 
-		spendByClass, err := store.SpendByClass()
+		spendByClass, err := store.SpendByClass(tenantID)
 		if err != nil {
 			log.Printf("dashboard-summary: spend by class: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 
-		trend, err := store.GlobalTrend(30)
+		trend, err := store.GlobalTrend(tenantID, 30)
 		if err != nil {
 			log.Printf("dashboard-summary: global trend: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 
-		clusters, err := store.Clusters()
+		clusters, err := store.Clusters(tenantID)
 		if err != nil {
 			log.Printf("dashboard-summary: clusters: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -64,7 +70,7 @@ func handleDashboardSummary(store *Store) http.HandlerFunc {
 
 		clusterViews := make([]clusterSummaryView, 0, len(clusters))
 		for _, c := range clusters {
-			clusterTrend, err := store.CostTrend(c.ClusterID, 20)
+			clusterTrend, err := store.CostTrend(tenantID, c.ClusterID, 20)
 			if err != nil {
 				log.Printf("dashboard-summary: cost trend for %s: %v", c.ClusterID, err)
 				http.Error(w, "internal error", http.StatusInternalServerError)
@@ -77,7 +83,7 @@ func handleDashboardSummary(store *Store) http.HandlerFunc {
 			})
 		}
 
-		findings, err := store.LatestFindings(500)
+		findings, err := store.LatestFindings(tenantID, 500)
 		if err != nil {
 			log.Printf("dashboard-summary: findings: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -97,14 +103,14 @@ func handleDashboardSummary(store *Store) http.HandlerFunc {
 			topFixes = topFixes[:10]
 		}
 
-		anomalies, err := detectAnomalies(store)
+		anomalies, err := detectAnomalies(store, tenantID)
 		if err != nil {
 			log.Printf("dashboard-summary: anomalies: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 
-		spendByCloud, err := store.SpendByCloud()
+		spendByCloud, err := store.SpendByCloud(tenantID)
 		if err != nil {
 			log.Printf("dashboard-summary: spend by cloud: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)

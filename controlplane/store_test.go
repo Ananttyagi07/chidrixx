@@ -3,12 +3,16 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+var testTenantCounter int64
 
 func testStore(t *testing.T) *Store {
 	t.Helper()
@@ -22,10 +26,29 @@ func testStore(t *testing.T) *Store {
 	return s
 }
 
+// testTenant provisions a real tenant in the given store and returns its
+// ID -- every store method now requires one, so tests need a real tenant
+// to scope their fixtures to, not just an arbitrary int.
+func testTenant(t *testing.T, s *Store) int64 {
+	t.Helper()
+
+	n := atomic.AddInt64(&testTenantCounter, 1)
+	tenantID, _, err := s.CreateTenant(
+		fmt.Sprintf("test-tenant-%d", n),
+		fmt.Sprintf("admin-%d", n),
+		"test-password-123",
+	)
+	if err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	return tenantID
+}
+
 func TestIngestAndClusters(t *testing.T) {
 	s := testStore(t)
+	tenantID := testTenant(t, s)
 
-	err := s.Ingest("cluster-a", []Finding{
+	err := s.Ingest(tenantID, "cluster-a", []Finding{
 		{Source: "ns/app", Destination: "8.8.8.8", PathClass: "INTERNET_EGRESS", Confidence: "high", BytesTx: 100, CostLowINR: 1, CostHighINR: 2},
 		{Source: "ns/db", Destination: "ns/app", PathClass: "SAME_NODE", Confidence: "high", BytesTx: 50},
 	})
@@ -33,7 +56,7 @@ func TestIngestAndClusters(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	clusters, err := s.Clusters()
+	clusters, err := s.Clusters(tenantID)
 	if err != nil {
 		t.Fatalf("Clusters: %v", err)
 	}
@@ -50,17 +73,18 @@ func TestIngestAndClusters(t *testing.T) {
 
 func TestFixManifestRoundTrips(t *testing.T) {
 	s := testStore(t)
+	tenantID := testTenant(t, s)
 
 	manifest := "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\n"
 
-	if err := s.Ingest("cluster-a", []Finding{
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{
 		{Source: "ns/app", Destination: "8.8.8.8", PathClass: "INTERNET_EGRESS", Confidence: "high",
 			FixHint: "confirm this needs to leave", FixManifest: manifest},
 	}); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	findings, err := s.LatestFindings(10)
+	findings, err := s.LatestFindings(tenantID, 10)
 	if err != nil {
 		t.Fatalf("LatestFindings: %v", err)
 	}
@@ -111,14 +135,15 @@ CREATE TABLE flow_aggregate (
 		t.Fatalf("OpenStore against pre-existing old-schema database: %v", err)
 	}
 	t.Cleanup(func() { s.Close() })
+	tenantID := testTenant(t, s)
 
-	if err := s.Ingest("cluster-a", []Finding{
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{
 		{Source: "ns/app", Destination: "8.8.8.8", PathClass: "INTERNET_EGRESS", Confidence: "high", FixManifest: "some-manifest"},
 	}); err != nil {
 		t.Fatalf("Ingest against migrated database: %v", err)
 	}
 
-	findings, err := s.LatestFindings(10)
+	findings, err := s.LatestFindings(tenantID, 10)
 	if err != nil {
 		t.Fatalf("LatestFindings against migrated database: %v", err)
 	}
@@ -128,11 +153,72 @@ CREATE TABLE flow_aggregate (
 	}
 }
 
+// TestOpenStoreMigratesSettingsTableWithoutTenantID guards a real bug found
+// while building multi-tenancy: the settings table's original schema made
+// `key` alone the PRIMARY KEY, so a naive ADD COLUMN tenant_id migration
+// would leave two tenants both setting "budget_inr" silently overwriting
+// each other. This proves a genuinely old settings table (single-column PK,
+// a real pre-existing budget value already in it) survives the rebuild to
+// (tenant_id, key) with that value intact and attributed to tenant 1.
+func TestOpenStoreMigratesSettingsTableWithoutTenantID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old-settings.db")
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open pre-migration db: %v", err)
+	}
+
+	if _, err := db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); err != nil {
+		t.Fatalf("create old settings schema: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO settings (key, value) VALUES ('budget_inr', '750')`); err != nil {
+		t.Fatalf("seed old budget value: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close pre-migration db: %v", err)
+	}
+
+	s, err := OpenStore(path)
+	if err != nil {
+		t.Fatalf("OpenStore against pre-existing old settings schema: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	amount, isSet, err := s.GetBudget(1)
+	if err != nil {
+		t.Fatalf("GetBudget(1) against migrated database: %v", err)
+	}
+	if !isSet || amount != 750 {
+		t.Fatalf("expected the pre-existing budget (750) to survive migration under tenant 1, got (%v, %v)", amount, isSet)
+	}
+
+	// A second tenant setting the same key must not collide with tenant 1's
+	// migrated value -- this is exactly the bug a single-column PK would
+	// still have even after ADD COLUMN. testTenant's first call would
+	// itself get id=1 (the autoincrement starting point) and collide with
+	// the already-migrated tenant, so create one throwaway tenant first to
+	// push the real "second tenant" to id=2.
+	_ = testTenant(t, s)
+	tenantB := testTenant(t, s)
+	if err := s.SetBudget(tenantB, 999); err != nil {
+		t.Fatalf("SetBudget(tenantB): %v", err)
+	}
+
+	amountAfter, _, err := s.GetBudget(1)
+	if err != nil {
+		t.Fatalf("GetBudget(1) after tenant b sets its own budget: %v", err)
+	}
+	if amountAfter != 750 {
+		t.Fatalf("tenant 1's migrated budget changed after tenant b set its own: got %v, want 750", amountAfter)
+	}
+}
+
 func TestLatestFindingsOnlyUsesMostRecentSnapshotPerCluster(t *testing.T) {
 	s := testStore(t)
+	tenantID := testTenant(t, s)
 
 	// First (stale) snapshot for cluster-a.
-	if err := s.Ingest("cluster-a", []Finding{
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{
 		{Source: "ns/old", Destination: "1.1.1.1", PathClass: "INTERNET_EGRESS", Confidence: "high", CostHighINR: 100},
 	}); err != nil {
 		t.Fatalf("Ingest (stale): %v", err)
@@ -142,20 +228,20 @@ func TestLatestFindingsOnlyUsesMostRecentSnapshotPerCluster(t *testing.T) {
 
 	// Second (current) snapshot for cluster-a — should replace the stale one
 	// in "current state" queries, not add to it.
-	if err := s.Ingest("cluster-a", []Finding{
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{
 		{Source: "ns/current", Destination: "2.2.2.2", PathClass: "INTERNET_EGRESS", Confidence: "high", CostHighINR: 5},
 	}); err != nil {
 		t.Fatalf("Ingest (current): %v", err)
 	}
 
 	// A second cluster's snapshot should also appear.
-	if err := s.Ingest("cluster-b", []Finding{
+	if err := s.Ingest(tenantID, "cluster-b", []Finding{
 		{Source: "ns/other", Destination: "3.3.3.3", PathClass: "CROSS_AZ", Confidence: "med", CostHighINR: 3},
 	}); err != nil {
 		t.Fatalf("Ingest (cluster-b): %v", err)
 	}
 
-	findings, err := s.LatestFindings(100)
+	findings, err := s.LatestFindings(tenantID, 100)
 	if err != nil {
 		t.Fatalf("LatestFindings: %v", err)
 	}
@@ -178,30 +264,31 @@ func TestLatestFindingsOnlyUsesMostRecentSnapshotPerCluster(t *testing.T) {
 
 func TestSummaryAggregatesLatestSnapshotsOnly(t *testing.T) {
 	s := testStore(t)
+	tenantID := testTenant(t, s)
 
 	// Stale snapshot for cluster-a — must not be double-counted once a
 	// newer one exists.
-	if err := s.Ingest("cluster-a", []Finding{
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{
 		{Source: "ns/old", Destination: "1.1.1.1", PathClass: "INTERNET_EGRESS", BytesTx: 999, CostHighINR: 999},
 	}); err != nil {
 		t.Fatalf("Ingest (stale): %v", err)
 	}
 	time.Sleep(1100 * time.Millisecond)
 
-	if err := s.Ingest("cluster-a", []Finding{
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{
 		{Source: "ns/app", Destination: "8.8.8.8", PathClass: "INTERNET_EGRESS", BytesTx: 100, BytesRx: 50, CostLowINR: 1, CostHighINR: 2},
 		{Source: "ns/db", Destination: "ns/app", PathClass: "SAME_NODE", BytesTx: 10, BytesRx: 10, CostLowINR: 0, CostHighINR: 0},
 	}); err != nil {
 		t.Fatalf("Ingest (cluster-a current): %v", err)
 	}
 
-	if err := s.Ingest("cluster-b", []Finding{
+	if err := s.Ingest(tenantID, "cluster-b", []Finding{
 		{Source: "ns/other", Destination: "3.3.3.3", PathClass: "CROSS_AZ", BytesTx: 20, BytesRx: 5, CostLowINR: 2, CostHighINR: 3},
 	}); err != nil {
 		t.Fatalf("Ingest (cluster-b): %v", err)
 	}
 
-	sum, err := s.Summary()
+	sum, err := s.Summary(tenantID)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -225,8 +312,9 @@ func TestSummaryAggregatesLatestSnapshotsOnly(t *testing.T) {
 
 func TestSpendByClassGroupsAndRanksByCost(t *testing.T) {
 	s := testStore(t)
+	tenantID := testTenant(t, s)
 
-	if err := s.Ingest("cluster-a", []Finding{
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{
 		{Source: "ns/a", Destination: "1.1.1.1", PathClass: "INTERNET_EGRESS", CostHighINR: 10},
 		{Source: "ns/b", Destination: "2.2.2.2", PathClass: "INTERNET_EGRESS", CostHighINR: 5},
 		{Source: "ns/c", Destination: "ns/d", PathClass: "CROSS_AZ", CostHighINR: 20},
@@ -234,7 +322,7 @@ func TestSpendByClassGroupsAndRanksByCost(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	classes, err := s.SpendByClass()
+	classes, err := s.SpendByClass(tenantID)
 	if err != nil {
 		t.Fatalf("SpendByClass: %v", err)
 	}
@@ -252,20 +340,21 @@ func TestSpendByClassGroupsAndRanksByCost(t *testing.T) {
 
 func TestSpendByCloudGroupsByCloudAndRegion(t *testing.T) {
 	s := testStore(t)
+	tenantID := testTenant(t, s)
 
-	if err := s.Ingest("cluster-a", []Finding{
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{
 		{Source: "ns/a", Destination: "1.1.1.1", PathClass: "INTERNET_EGRESS", CostHighINR: 10, Cloud: "aws", Region: "ap-south-1"},
 		{Source: "ns/b", Destination: "2.2.2.2", PathClass: "INTERNET_EGRESS", CostHighINR: 5, Cloud: "aws", Region: "ap-south-1"},
 	}); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
-	if err := s.Ingest("cluster-b", []Finding{
+	if err := s.Ingest(tenantID, "cluster-b", []Finding{
 		{Source: "ns/c", Destination: "3.3.3.3", PathClass: "INTERNET_EGRESS", CostHighINR: 20, Cloud: "gcp", Region: "asia-south1"},
 	}); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	clouds, err := s.SpendByCloud()
+	clouds, err := s.SpendByCloud(tenantID)
 	if err != nil {
 		t.Fatalf("SpendByCloud: %v", err)
 	}
@@ -283,14 +372,15 @@ func TestSpendByCloudGroupsByCloudAndRegion(t *testing.T) {
 
 func TestSpendByCloudFoldsMissingCloudIntoUnknown(t *testing.T) {
 	s := testStore(t)
+	tenantID := testTenant(t, s)
 
-	if err := s.Ingest("cluster-a", []Finding{
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{
 		{Source: "ns/a", Destination: "1.1.1.1", PathClass: "INTERNET_EGRESS", CostHighINR: 10},
 	}); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	clouds, err := s.SpendByCloud()
+	clouds, err := s.SpendByCloud(tenantID)
 	if err != nil {
 		t.Fatalf("SpendByCloud: %v", err)
 	}
@@ -302,14 +392,15 @@ func TestSpendByCloudFoldsMissingCloudIntoUnknown(t *testing.T) {
 
 func TestClustersIncludesCloudAndRegion(t *testing.T) {
 	s := testStore(t)
+	tenantID := testTenant(t, s)
 
-	if err := s.Ingest("cluster-a", []Finding{
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{
 		{Source: "ns/a", Destination: "1.1.1.1", PathClass: "INTERNET_EGRESS", CostHighINR: 10, Cloud: "aws", Region: "ap-south-1"},
 	}); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	clusters, err := s.Clusters()
+	clusters, err := s.Clusters(tenantID)
 	if err != nil {
 		t.Fatalf("Clusters: %v", err)
 	}
@@ -321,19 +412,20 @@ func TestClustersIncludesCloudAndRegion(t *testing.T) {
 
 func TestGlobalTrendSumsAcrossClustersOldestFirst(t *testing.T) {
 	s := testStore(t)
+	tenantID := testTenant(t, s)
 
-	if err := s.Ingest("cluster-a", []Finding{{Source: "ns/a", CostHighINR: 1}}); err != nil {
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{{Source: "ns/a", CostHighINR: 1}}); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
-	if err := s.Ingest("cluster-b", []Finding{{Source: "ns/b", CostHighINR: 2}}); err != nil {
+	if err := s.Ingest(tenantID, "cluster-b", []Finding{{Source: "ns/b", CostHighINR: 2}}); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 	time.Sleep(1100 * time.Millisecond)
-	if err := s.Ingest("cluster-a", []Finding{{Source: "ns/a", CostHighINR: 3}}); err != nil {
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{{Source: "ns/a", CostHighINR: 3}}); err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	trend, err := s.GlobalTrend(10)
+	trend, err := s.GlobalTrend(tenantID, 10)
 	if err != nil {
 		t.Fatalf("GlobalTrend: %v", err)
 	}
@@ -354,9 +446,10 @@ func TestGlobalTrendSumsAcrossClustersOldestFirst(t *testing.T) {
 
 func TestCostTrendOrdersOldestFirst(t *testing.T) {
 	s := testStore(t)
+	tenantID := testTenant(t, s)
 
 	for i := 0; i < 3; i++ {
-		if err := s.Ingest("cluster-a", []Finding{
+		if err := s.Ingest(tenantID, "cluster-a", []Finding{
 			{Source: "ns/app", Destination: "8.8.8.8", PathClass: "INTERNET_EGRESS", CostHighINR: float64(i + 1)},
 		}); err != nil {
 			t.Fatalf("Ingest #%d: %v", i, err)
@@ -364,7 +457,7 @@ func TestCostTrendOrdersOldestFirst(t *testing.T) {
 		time.Sleep(1100 * time.Millisecond)
 	}
 
-	trend, err := s.CostTrend("cluster-a", 10)
+	trend, err := s.CostTrend(tenantID, "cluster-a", 10)
 	if err != nil {
 		t.Fatalf("CostTrend: %v", err)
 	}
@@ -386,8 +479,9 @@ func TestCostTrendOrdersOldestFirst(t *testing.T) {
 
 func TestBudgetUnsetThenSetAndOverwrite(t *testing.T) {
 	s := testStore(t)
+	tenantID := testTenant(t, s)
 
-	_, isSet, err := s.GetBudget()
+	_, isSet, err := s.GetBudget(tenantID)
 	if err != nil {
 		t.Fatalf("GetBudget (unset): %v", err)
 	}
@@ -395,11 +489,11 @@ func TestBudgetUnsetThenSetAndOverwrite(t *testing.T) {
 		t.Fatalf("expected no budget set initially")
 	}
 
-	if err := s.SetBudget(1000); err != nil {
+	if err := s.SetBudget(tenantID, 1000); err != nil {
 		t.Fatalf("SetBudget: %v", err)
 	}
 
-	amount, isSet, err := s.GetBudget()
+	amount, isSet, err := s.GetBudget(tenantID)
 	if err != nil {
 		t.Fatalf("GetBudget: %v", err)
 	}
@@ -408,15 +502,137 @@ func TestBudgetUnsetThenSetAndOverwrite(t *testing.T) {
 	}
 
 	// Setting again overwrites rather than erroring or duplicating.
-	if err := s.SetBudget(2500); err != nil {
+	if err := s.SetBudget(tenantID, 2500); err != nil {
 		t.Fatalf("SetBudget (overwrite): %v", err)
 	}
 
-	amount, isSet, err = s.GetBudget()
+	amount, isSet, err = s.GetBudget(tenantID)
 	if err != nil {
 		t.Fatalf("GetBudget (after overwrite): %v", err)
 	}
 	if !isSet || amount != 2500 {
 		t.Fatalf("expected (2500, true) after overwrite, got (%v, %v)", amount, isSet)
+	}
+}
+
+func TestCreateUserAddsViewerToExistingTenant(t *testing.T) {
+	s := testStore(t)
+	tenantID := testTenant(t, s)
+
+	if err := s.CreateUser(tenantID, "a-viewer", "viewer-password-123", RoleViewer); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	user, err := s.AuthenticateUser("a-viewer", "viewer-password-123")
+	if err != nil {
+		t.Fatalf("AuthenticateUser: %v", err)
+	}
+	if user.TenantID != tenantID || user.Role != RoleViewer {
+		t.Fatalf("expected viewer on tenant %d, got: %+v", tenantID, user)
+	}
+}
+
+func TestCreateUserRejectsInvalidRole(t *testing.T) {
+	s := testStore(t)
+	tenantID := testTenant(t, s)
+
+	if err := s.CreateUser(tenantID, "someone", "password-123", "superuser"); err == nil {
+		t.Fatal("expected an error for an invalid role, got nil")
+	}
+}
+
+// TestTenantIsolationAcrossEveryReadPath is the one test that matters most
+// for "full multi-tenant isolation": two tenants, sharing the exact same
+// cluster ID and the same settings key, must never see a byte of each
+// other's data through any query path -- not just the ones convenient to
+// test.
+func TestTenantIsolationAcrossEveryReadPath(t *testing.T) {
+	s := testStore(t)
+
+	tenantA, _, err := s.CreateTenant("acme", "admin-a", "hunter2hunter2")
+	if err != nil {
+		t.Fatalf("create tenant a: %v", err)
+	}
+	tenantB, _, err := s.CreateTenant("globex", "admin-b", "hunter3hunter3")
+	if err != nil {
+		t.Fatalf("create tenant b: %v", err)
+	}
+
+	// Deliberately reused cluster ID across tenants -- isolation must hold
+	// even when the natural "key" a careless implementation might scope by
+	// collides.
+	if err := s.Ingest(tenantA, "shared-cluster-name", []Finding{
+		{Source: "acme-app", Destination: "1.1.1.1", PathClass: "INTERNET_EGRESS", CostHighINR: 111, Cloud: "aws", Region: "ap-south-1"},
+	}); err != nil {
+		t.Fatalf("ingest tenant a: %v", err)
+	}
+	if err := s.Ingest(tenantB, "shared-cluster-name", []Finding{
+		{Source: "globex-app", Destination: "2.2.2.2", PathClass: "CROSS_AZ", CostHighINR: 222, Cloud: "gcp", Region: "asia-south1"},
+	}); err != nil {
+		t.Fatalf("ingest tenant b: %v", err)
+	}
+	if err := s.SetBudget(tenantA, 500); err != nil {
+		t.Fatalf("set budget a: %v", err)
+	}
+	if err := s.SetBudget(tenantB, 9999); err != nil {
+		t.Fatalf("set budget b: %v", err)
+	}
+
+	clustersA, err := s.Clusters(tenantA)
+	if err != nil {
+		t.Fatalf("Clusters(a): %v", err)
+	}
+	if len(clustersA) != 1 || clustersA[0].CostHighINR != 111 {
+		t.Fatalf("tenant a's Clusters() leaked or missed data: %+v", clustersA)
+	}
+
+	findingsA, err := s.LatestFindings(tenantA, 100)
+	if err != nil {
+		t.Fatalf("LatestFindings(a): %v", err)
+	}
+	if len(findingsA) != 1 || findingsA[0].Source != "acme-app" {
+		t.Fatalf("tenant a's LatestFindings() leaked tenant b's data: %+v", findingsA)
+	}
+
+	summaryA, err := s.Summary(tenantA)
+	if err != nil {
+		t.Fatalf("Summary(a): %v", err)
+	}
+	if summaryA.TotalCostHighINR != 111 {
+		t.Fatalf("tenant a's Summary() leaked tenant b's cost: %+v", summaryA)
+	}
+
+	cloudsA, err := s.SpendByCloud(tenantA)
+	if err != nil {
+		t.Fatalf("SpendByCloud(a): %v", err)
+	}
+	if len(cloudsA) != 1 || cloudsA[0].Cloud != "aws" {
+		t.Fatalf("tenant a's SpendByCloud() leaked tenant b's gcp data: %+v", cloudsA)
+	}
+
+	budgetA, isSetA, err := s.GetBudget(tenantA)
+	if err != nil {
+		t.Fatalf("GetBudget(a): %v", err)
+	}
+	if !isSetA || budgetA != 500 {
+		t.Fatalf("tenant a's budget leaked tenant b's value: got %v, want 500", budgetA)
+	}
+
+	// And the mirror image for tenant b, so this isn't just "a doesn't see
+	// b" but genuinely bidirectional.
+	clustersB, err := s.Clusters(tenantB)
+	if err != nil {
+		t.Fatalf("Clusters(b): %v", err)
+	}
+	if len(clustersB) != 1 || clustersB[0].CostHighINR != 222 {
+		t.Fatalf("tenant b's Clusters() leaked or missed data: %+v", clustersB)
+	}
+
+	budgetB, _, err := s.GetBudget(tenantB)
+	if err != nil {
+		t.Fatalf("GetBudget(b): %v", err)
+	}
+	if budgetB != 9999 {
+		t.Fatalf("tenant b's budget leaked tenant a's value: got %v, want 9999", budgetB)
 	}
 }

@@ -27,14 +27,16 @@ spec:
           args:
             - -addr=:{{ .Values.service.port }}
             - -db=/data/controlplane.db
-          {{- $authSecret := include "chidrixx-controlplane.authSecretName" . }}
-          {{- if $authSecret }}
           env:
-            - name: CHIDRIXX_AUTH_TOKEN
+            - name: CHIDRIXX_ADMIN_USER
+              value: {{ .Values.auth.adminUser | quote }}
+          {{- $pwSecret := include "chidrixx-controlplane.adminPasswordSecretName" . }}
+          {{- if $pwSecret }}
+            - name: CHIDRIXX_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ $authSecret }}
-                  key: {{ .Values.auth.tokenSecretKey }}
+                  name: {{ $pwSecret }}
+                  key: {{ .Values.auth.adminPasswordSecretKey }}
           {{- end }}
           ports:
             - name: http

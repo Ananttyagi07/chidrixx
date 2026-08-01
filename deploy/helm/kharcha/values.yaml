@@ -54,11 +54,14 @@ alerting:
 # nothing leaves the node by default. If deploy/helm/controlplane is
 # installed in-cluster as release "chidrixx", its Service DNS name is
 # http://chidrixx-controlplane.<namespace>.svc.cluster.local:8090/api/v1/ingest.
-# If the control plane has CHIDRIXX_AUTH_TOKEN set, create a matching
-# secret yourself (`kubectl create secret generic kharcha-controlplane-token
-# --from-literal=token=...`) and reference it here — same pattern as
-# alerting's webhook secret, for the same reason (a shared credential
-# doesn't belong in a plain Helm value).
+# The control plane now has real multi-tenant login (controlplane/tenant.go)
+# — this token is your tenant's own ingest token, shown once in the control
+# plane's bootstrap logs (or by `create-tenant`/`create-user`), not a secret
+# shared across every tenant. Create a matching secret yourself
+# (`kubectl create secret generic kharcha-controlplane-token
+# --from-literal=token=<your tenant's ingest token>`) and reference it here
+# — same pattern as alerting's webhook secret, for the same reason (a
+# credential doesn't belong in a plain Helm value).
 controlPlane:
   url: ""
   clusterID: ""

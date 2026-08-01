@@ -11,6 +11,7 @@ import (
 
 func TestHandleIngestAndFindingsAPI(t *testing.T) {
 	store := testStore(t)
+	tenantID := testTenant(t, store)
 
 	body, _ := json.Marshal(IngestRequest{
 		ClusterID: "cluster-a",
@@ -19,7 +20,7 @@ func TestHandleIngestAndFindingsAPI(t *testing.T) {
 		},
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest", bytes.NewReader(body))
+	req := withTenant(httptest.NewRequest(http.MethodPost, "/api/v1/ingest", bytes.NewReader(body)), tenantID)
 	rec := httptest.NewRecorder()
 	handleIngest(store)(rec, req)
 
@@ -27,7 +28,7 @@ func TestHandleIngestAndFindingsAPI(t *testing.T) {
 		t.Fatalf("ingest status = %d, want %d; body: %s", rec.Code, http.StatusAccepted, rec.Body.String())
 	}
 
-	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/findings", nil)
+	req2 := withTenant(httptest.NewRequest(http.MethodGet, "/api/v1/findings", nil), tenantID)
 	rec2 := httptest.NewRecorder()
 	handleFindingsAPI(store)(rec2, req2)
 
@@ -67,5 +68,18 @@ func TestHandleIngestRejectsWrongMethod(t *testing.T) {
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+}
+
+func TestHandleIngestRejectsMissingTenantContext(t *testing.T) {
+	store := testStore(t)
+
+	body, _ := json.Marshal(IngestRequest{ClusterID: "cluster-a", Findings: []Finding{{Source: "ns/app"}}})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handleIngest(store)(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 when no tenant is resolved (bypassing requireAPIToken)", rec.Code)
 	}
 }

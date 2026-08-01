@@ -16,28 +16,33 @@ persistence:
   size: 2Gi
   storageClassName: ""
 
-# Auth (see controlplane/auth.go). Secure by default: if tokenSecretName is
-# left empty and generate=true, the chart creates and manages its own
-# random token secret (kept stable across upgrades via a `lookup` check —
-# it only generates once, never rotates one it finds). Fetch it for the
-# agent side with:
-#   kubectl get secret -n <namespace> <release>-controlplane-auth-token \
-#     -o jsonpath='{.data.token}' | base64 -d
-# (also printed in `helm install`/`helm upgrade` NOTES).
+# Auth (see controlplane/tenant.go, auth.go). Real multi-tenant login —
+# no more single shared Basic Auth token. On first boot (no tenants in the
+# database yet), the control plane bootstraps one tenant with one admin
+# user, username from adminUser below, password from the generated secret
+# unless adminPasswordSecretName is set to one you manage yourself. Fetch
+# the generated password with:
+#   kubectl get secret -n <namespace> <release>-controlplane-admin-password \
+#     -o jsonpath='{.data.password}' | base64 -d
+# (also printed in `helm install`/`helm upgrade` NOTES, and once in the pod
+# logs on first boot alongside the tenant's agent ingest token — the ingest
+# token is generated server-side and only ever shown that one time, so
+# capture it from `kubectl logs` right after first install).
 #
-# There is no way to auto-sync this to the kharcha agent's Helm release
-# automatically — they're independent releases, possibly in different
-# clusters, with no shared secret store between them. That one copy step
-# is still manual; this only removes the "come up with your own token and
-# create both secrets by hand" step.
+# Provisioning additional tenants is an operator action, not a web
+# form — run `kubectl exec` into the pod and use the `create-tenant` /
+# `create-user` CLI subcommands (see PROJECT_STATUS.md).
 #
-# Set generate=false (with tokenSecretName still empty) to run fully
-# unauthenticated instead — fine for a quick local trial, not for anything
-# reachable beyond a trusted network. Set tokenSecretName to use a secret
-# you manage yourself instead of the generated one.
+# Set generate=false (with adminPasswordSecretName still empty) to skip
+# the chart managing a K8s Secret at all — the control plane binary itself
+# still always bootstraps a real admin account either way; without a
+# CHIDRIXX_ADMIN_PASSWORD env var it generates its own random password and
+# logs it once. There's no "unauthenticated" mode anymore now that real
+# accounts exist — that gap the old shared-token model still had is closed.
 auth:
-  tokenSecretName: ""
-  tokenSecretKey: "token"
+  adminUser: "admin"
+  adminPasswordSecretName: ""
+  adminPasswordSecretKey: "password"
   generate: true
 
 resources: {}

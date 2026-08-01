@@ -11,8 +11,9 @@ import (
 
 func TestHandleDashboardSummary(t *testing.T) {
 	store := testStore(t)
+	tenantID := testTenant(t, store)
 
-	if err := store.Ingest("cluster-a", []Finding{
+	if err := store.Ingest(tenantID, "cluster-a", []Finding{
 		{Source: "ns/app", Destination: "8.8.8.8", PathClass: "INTERNET_EGRESS", Confidence: "high",
 			BytesTx: 100, CostLowINR: 1, CostHighINR: 2, FixHint: "confirm this needs to leave"},
 		{Source: "ns/db", Destination: "ns/app", PathClass: "SAME_NODE", Confidence: "high"},
@@ -20,7 +21,7 @@ func TestHandleDashboardSummary(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/dashboard-summary", nil)
+	req := withTenant(httptest.NewRequest(http.MethodGet, "/api/v1/dashboard-summary", nil), tenantID)
 	rec := httptest.NewRecorder()
 	handleDashboardSummary(store)(rec, req)
 
@@ -57,8 +58,9 @@ func TestHandleDashboardSummary(t *testing.T) {
 // ingests ever received would crash the dashboard on first load.
 func TestHandleDashboardSummaryEmptyStateHasNoNullArrays(t *testing.T) {
 	store := testStore(t)
+	tenantID := testTenant(t, store)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/dashboard-summary", nil)
+	req := withTenant(httptest.NewRequest(http.MethodGet, "/api/v1/dashboard-summary", nil), tenantID)
 	rec := httptest.NewRecorder()
 	handleDashboardSummary(store)(rec, req)
 

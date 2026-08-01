@@ -1,20 +1,42 @@
 chidrixx control plane deployed.
 
-{{- $authSecret := include "chidrixx-controlplane.authSecretName" . }}
-{{- if $authSecret }}
+Real multi-tenant login is enabled — a default tenant + admin user is
+bootstrapped on first boot (the database has no tenants yet).
 
-Auth is enabled. Fetch the token to use it (from a browser, or to wire up
-a kharcha agent's controlPlane.tokenSecretName in another cluster):
+{{- $pwSecret := include "chidrixx-controlplane.adminPasswordSecretName" . }}
+{{- if $pwSecret }}
 
-  kubectl get secret -n {{ .Release.Namespace }} {{ $authSecret }} \
-    -o jsonpath='{.data.{{ .Values.auth.tokenSecretKey }}}' | base64 -d
+Admin username: {{ .Values.auth.adminUser }}
+Fetch the generated admin password:
+
+  kubectl get secret -n {{ .Release.Namespace }} {{ $pwSecret }} \
+    -o jsonpath='{.data.{{ .Values.auth.adminPasswordSecretKey }}}' | base64 -d
 
 {{- else }}
 
-Auth is DISABLED (auth.generate=false, no auth.tokenSecretName set) — the
-dashboard and ingest API are open to anything that can reach the Service.
-Fine for a quick local trial, not for anything reachable beyond a trusted
-network.
+auth.generate=false and no auth.adminPasswordSecretName was set — the
+control plane generated its own random admin password on first boot and
+logged it once. Check:
+
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=chidrixx-controlplane --tail=200 | grep bootstrap
+
 {{- end }}
+
+The bootstrap log line ALSO prints this tenant's agent ingest token —
+capture it from the same `kubectl logs` command right after first
+install, since it's only ever shown that one time. Put it in
+CHIDRIXX_AUTH_TOKEN on every kharcha agent that ships to this tenant.
+
+To provision an additional tenant (real data isolation, not just a second
+user), or an additional user (e.g. a read-only viewer) on an existing
+tenant, exec into the running pod:
+
+  kubectl exec -it -n {{ .Release.Namespace }} deploy/{{ include "chidrixx-controlplane.fullname" . }} -- \
+    /app/controlplane create-tenant --db /data/controlplane.db \
+      --name <name> --admin-user <user> --admin-password <password>
+
+  kubectl exec -it -n {{ .Release.Namespace }} deploy/{{ include "chidrixx-controlplane.fullname" . }} -- \
+    /app/controlplane create-user --db /data/controlplane.db \
+      --tenant-id <id> --username <user> --password <password> --role viewer
 
 Service: {{ include "chidrixx-controlplane.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}

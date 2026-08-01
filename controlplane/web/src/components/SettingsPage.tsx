@@ -1,13 +1,17 @@
 import { motion } from "framer-motion";
 import type { DashboardSummary } from "../types";
+import { useSession } from "../session";
 
 // Real, minimal, honest -- no fake toggles for capabilities that don't
 // exist (no theme switch, since light is the enforced default by
 // deliberate choice; no notification prefs, since there's no
 // notification system beyond the agent's own webhook alerting).
 export function SettingsPage({ data }: { data: DashboardSummary }) {
+  const { username, role } = useSession();
+
   const rows: Array<[string, string]> = [
-    ["Authentication", "Basic Auth, one shared token — no per-user accounts"],
+    ["Signed in as", `${username} (${role})`],
+    ["Authentication", "Per-tenant login (bcrypt password, server-tracked session) — real multi-tenant isolation"],
     ["Storage", "SQLite (embedded, pure Go)"],
     ["Clusters connected", String(data.summary.ClusterCount)],
     ["Workloads tracked", String(data.summary.WorkloadCount)],
@@ -39,10 +43,9 @@ export function SettingsPage({ data }: { data: DashboardSummary }) {
       </div>
 
       <p className="max-w-md text-xs text-[var(--ink-muted)]">
-        There's no per-user role or notification preference to configure — one shared token
-        controls everything behind it. To rotate it, update the{" "}
-        <code className="rounded bg-[var(--surface-sunken)] px-1 py-0.5">CHIDRIXX_AUTH_TOKEN</code> secret
-        and restart the control plane.
+        {role === "admin"
+          ? "As an admin on this tenant, you can set the budget figure. Provisioning new tenants is an operator action (the create-tenant CLI subcommand), not a self-service signup flow."
+          : "As a viewer on this tenant, you can see everything but can't change the budget figure — ask an admin on your tenant."}
       </p>
     </motion.div>
   );

@@ -50,8 +50,41 @@ CREATE TABLE IF NOT EXISTS flow_aggregate (
 CREATE INDEX IF NOT EXISTS idx_flow_aggregate_cluster_time ON flow_aggregate(cluster_id, reported_at);
 
 CREATE TABLE IF NOT EXISTS settings (
-	key   TEXT PRIMARY KEY,
-	value TEXT NOT NULL
+	tenant_id INTEGER NOT NULL DEFAULT 1,
+	key       TEXT NOT NULL,
+	value     TEXT NOT NULL,
+	PRIMARY KEY (tenant_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS tenants (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	name       TEXT NOT NULL,
+	created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS users (
+	id            INTEGER PRIMARY KEY AUTOINCREMENT,
+	tenant_id     INTEGER NOT NULL REFERENCES tenants(id),
+	username      TEXT NOT NULL UNIQUE,
+	password_hash TEXT NOT NULL,
+	role          TEXT NOT NULL,
+	created_at    INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	tenant_id  INTEGER NOT NULL REFERENCES tenants(id),
+	token_hash TEXT NOT NULL UNIQUE,
+	label      TEXT,
+	created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+	id         TEXT PRIMARY KEY,
+	user_id    INTEGER NOT NULL REFERENCES users(id),
+	tenant_id  INTEGER NOT NULL REFERENCES tenants(id),
+	created_at INTEGER NOT NULL,
+	expires_at INTEGER NOT NULL
 );
 `
 	if _, err := db.Exec(schema); err != nil {
@@ -81,6 +114,59 @@ CREATE TABLE IF NOT EXISTS settings (
 		}
 	}
 
+	// tenant_id was added once real multi-tenant isolation shipped. Every
+	// pre-existing row (from before tenants existed at all) backfills to
+	// tenant 1 -- main.go's bootstrap always creates the first tenant with
+	// that id, so existing single-tenant installs keep working against
+	// their own data after the upgrade instead of it becoming orphaned.
+	if _, err := db.Exec(`ALTER TABLE flow_aggregate ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		db.Close()
+		return nil, fmt.Errorf("migrate tenant_id column on flow_aggregate: %w", err)
+	}
+
+	// settings needs more than ADD COLUMN: its original schema made `key`
+	// alone the PRIMARY KEY, so two tenants both setting e.g. "budget_inr"
+	// would silently overwrite each other's value. SQLite can't ALTER a
+	// primary key in place, so a database still on the old shape gets its
+	// settings table rebuilt with the real (tenant_id, key) composite key --
+	// existing rows backfill to tenant 1, same as flow_aggregate above.
+	var settingsCreateSQL string
+	err = db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'settings'`).Scan(&settingsCreateSQL)
+	if err != nil && err != sql.ErrNoRows {
+		db.Close()
+		return nil, fmt.Errorf("inspect settings schema: %w", err)
+	}
+	if err == nil && !strings.Contains(settingsCreateSQL, "PRIMARY KEY (tenant_id, key)") {
+		migration := []string{
+			`CREATE TABLE settings_new (
+				tenant_id INTEGER NOT NULL DEFAULT 1,
+				key       TEXT NOT NULL,
+				value     TEXT NOT NULL,
+				PRIMARY KEY (tenant_id, key)
+			)`,
+			`INSERT INTO settings_new (tenant_id, key, value) SELECT 1, key, value FROM settings`,
+			`DROP TABLE settings`,
+			`ALTER TABLE settings_new RENAME TO settings`,
+		}
+		tx, err := db.Begin()
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("begin settings migration: %w", err)
+		}
+		for _, stmt := range migration {
+			if _, err := tx.Exec(stmt); err != nil {
+				tx.Rollback()
+				db.Close()
+				return nil, fmt.Errorf("migrate settings table (%s): %w", stmt, err)
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("commit settings migration: %w", err)
+		}
+	}
+
 	return &Store{db: db}, nil
 }
 
@@ -89,8 +175,11 @@ func (s *Store) Close() error {
 }
 
 // Ingest records one full snapshot from a cluster's agent as a batch of
-// rows sharing one reported_at timestamp.
-func (s *Store) Ingest(clusterID string, findings []Finding) error {
+// rows sharing one reported_at timestamp, tagged with the tenant the
+// ingesting API token resolved to -- this is the one write path where
+// tenant isolation actually gets enforced; every read path below just
+// trusts that every row already carries the right tenant_id.
+func (s *Store) Ingest(tenantID int64, clusterID string, findings []Finding) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -100,10 +189,10 @@ func (s *Store) Ingest(clusterID string, findings []Finding) error {
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO flow_aggregate
-			(cluster_id, reported_at, src_workload, dst_workload_or_endpoint,
+			(tenant_id, cluster_id, reported_at, src_workload, dst_workload_or_endpoint,
 			 path_class, confidence, bytes_tx, bytes_rx, cost_low_inr, cost_high_inr, fix_hint, fix_manifest,
 			 cloud, region)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		tx.Rollback()
@@ -113,7 +202,7 @@ func (s *Store) Ingest(clusterID string, findings []Finding) error {
 
 	for _, f := range findings {
 		if _, err := stmt.Exec(
-			clusterID, reportedAt, f.Source, f.Destination,
+			tenantID, clusterID, reportedAt, f.Source, f.Destination,
 			f.PathClass, f.Confidence, f.BytesTx, f.BytesRx,
 			f.CostLowINR, f.CostHighINR, f.FixHint, f.FixManifest,
 			f.Cloud, f.Region,
@@ -141,22 +230,27 @@ type ClusterSummary struct {
 	Region string
 }
 
-// Clusters returns every distinct cluster that has ever ingested, with its
-// most recent snapshot's totals.
-func (s *Store) Clusters() ([]ClusterSummary, error) {
+// Clusters returns every distinct cluster that has ever ingested under the
+// given tenant, with its most recent snapshot's totals. Scoped by
+// tenant_id at every level (the CTE and the join) so a cluster ID reused
+// by two different tenants -- unlikely, but not something to trust --
+// never merges their data.
+func (s *Store) Clusters(tenantID int64) ([]ClusterSummary, error) {
 	rows, err := s.db.Query(`
 		WITH latest AS (
 			SELECT cluster_id, MAX(reported_at) AS max_time
 			FROM flow_aggregate
+			WHERE tenant_id = ?
 			GROUP BY cluster_id
 		)
 		SELECT fa.cluster_id, l.max_time, COUNT(*), COALESCE(SUM(fa.cost_low_inr), 0), COALESCE(SUM(fa.cost_high_inr), 0),
 		       COALESCE(MIN(NULLIF(fa.cloud, '')), ''), COALESCE(MIN(NULLIF(fa.region, '')), '')
 		FROM flow_aggregate fa
 		JOIN latest l ON fa.cluster_id = l.cluster_id AND fa.reported_at = l.max_time
+		WHERE fa.tenant_id = ?
 		GROUP BY fa.cluster_id, l.max_time
 		ORDER BY l.max_time DESC
-	`)
+	`, tenantID, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("query clusters: %w", err)
 	}
@@ -186,14 +280,17 @@ type FindingRow struct {
 	ReportedAt time.Time
 }
 
-// LatestFindings returns the current state across every cluster — each
-// cluster's most recent snapshot, unioned and ranked by cost — capped at
-// limit rows. This is the "multi-cluster view" (FR-C1).
-func (s *Store) LatestFindings(limit int) ([]FindingRow, error) {
+// LatestFindings returns the current state across every cluster belonging
+// to the given tenant — each cluster's most recent snapshot, unioned and
+// ranked by cost — capped at limit rows. This is the "multi-cluster view"
+// (FR-C1), now scoped to one tenant's clusters rather than every cluster
+// this control plane has ever ingested from.
+func (s *Store) LatestFindings(tenantID int64, limit int) ([]FindingRow, error) {
 	rows, err := s.db.Query(`
 		WITH latest AS (
 			SELECT cluster_id, MAX(reported_at) AS max_time
 			FROM flow_aggregate
+			WHERE tenant_id = ?
 			GROUP BY cluster_id
 		)
 		SELECT fa.cluster_id, fa.reported_at, fa.src_workload, fa.dst_workload_or_endpoint,
@@ -202,9 +299,10 @@ func (s *Store) LatestFindings(limit int) ([]FindingRow, error) {
 		       fa.cloud, fa.region
 		FROM flow_aggregate fa
 		JOIN latest l ON fa.cluster_id = l.cluster_id AND fa.reported_at = l.max_time
+		WHERE fa.tenant_id = ?
 		ORDER BY fa.cost_high_inr DESC
 		LIMIT ?
-	`, limit)
+	`, tenantID, tenantID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query latest findings: %w", err)
 	}
@@ -249,15 +347,16 @@ type Summary struct {
 	TotalCostHighINR float64
 }
 
-// Summary aggregates the current (latest-per-cluster) state into the
-// headline numbers a dashboard's stat row needs.
-func (s *Store) Summary() (Summary, error) {
+// Summary aggregates the current (latest-per-cluster) state for one
+// tenant into the headline numbers a dashboard's stat row needs.
+func (s *Store) Summary(tenantID int64) (Summary, error) {
 	var out Summary
 
 	row := s.db.QueryRow(`
 		WITH latest AS (
 			SELECT cluster_id, MAX(reported_at) AS max_time
 			FROM flow_aggregate
+			WHERE tenant_id = ?
 			GROUP BY cluster_id
 		)
 		SELECT
@@ -270,7 +369,8 @@ func (s *Store) Summary() (Summary, error) {
 			COALESCE(SUM(fa.cost_high_inr), 0)
 		FROM flow_aggregate fa
 		JOIN latest l ON fa.cluster_id = l.cluster_id AND fa.reported_at = l.max_time
-	`)
+		WHERE fa.tenant_id = ?
+	`, tenantID, tenantID)
 
 	if err := row.Scan(
 		&out.ClusterCount, &out.WorkloadCount, &out.FindingCount,
@@ -291,21 +391,23 @@ type ClassSpend struct {
 	FindingCount int
 }
 
-// SpendByClass groups the current state by path class, highest cost
-// first — the real data behind a "spend by category" breakdown.
-func (s *Store) SpendByClass() ([]ClassSpend, error) {
+// SpendByClass groups one tenant's current state by path class, highest
+// cost first — the real data behind a "spend by category" breakdown.
+func (s *Store) SpendByClass(tenantID int64) ([]ClassSpend, error) {
 	rows, err := s.db.Query(`
 		WITH latest AS (
 			SELECT cluster_id, MAX(reported_at) AS max_time
 			FROM flow_aggregate
+			WHERE tenant_id = ?
 			GROUP BY cluster_id
 		)
 		SELECT fa.path_class, COALESCE(SUM(fa.cost_high_inr), 0), COUNT(*)
 		FROM flow_aggregate fa
 		JOIN latest l ON fa.cluster_id = l.cluster_id AND fa.reported_at = l.max_time
+		WHERE fa.tenant_id = ?
 		GROUP BY fa.path_class
 		ORDER BY SUM(fa.cost_high_inr) DESC
-	`)
+	`, tenantID, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("query spend by class: %w", err)
 	}
@@ -336,24 +438,26 @@ type CloudSpend struct {
 	FindingCount int
 }
 
-// SpendByCloud groups the current state by (cloud, region), highest cost
-// first. Rows with no cloud/region recorded (findings shipped before this
-// field existed) fold into a single "unknown" bucket rather than being
-// silently dropped.
-func (s *Store) SpendByCloud() ([]CloudSpend, error) {
+// SpendByCloud groups one tenant's current state by (cloud, region),
+// highest cost first. Rows with no cloud/region recorded (findings shipped
+// before this field existed) fold into a single "unknown" bucket rather
+// than being silently dropped.
+func (s *Store) SpendByCloud(tenantID int64) ([]CloudSpend, error) {
 	rows, err := s.db.Query(`
 		WITH latest AS (
 			SELECT cluster_id, MAX(reported_at) AS max_time
 			FROM flow_aggregate
+			WHERE tenant_id = ?
 			GROUP BY cluster_id
 		)
 		SELECT COALESCE(NULLIF(fa.cloud, ''), 'unknown'), COALESCE(NULLIF(fa.region, ''), 'unknown'),
 		       COALESCE(SUM(fa.cost_high_inr), 0), COUNT(*)
 		FROM flow_aggregate fa
 		JOIN latest l ON fa.cluster_id = l.cluster_id AND fa.reported_at = l.max_time
+		WHERE fa.tenant_id = ?
 		GROUP BY 1, 2
 		ORDER BY SUM(fa.cost_high_inr) DESC
-	`)
+	`, tenantID, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("query spend by cloud: %w", err)
 	}
@@ -375,14 +479,15 @@ func (s *Store) SpendByCloud() ([]CloudSpend, error) {
 // first. Snapshots across independently-scheduled agents won't align
 // perfectly, so this is a real but approximate combined trend — accurate
 // per-cluster trends are what CostTrend is for.
-func (s *Store) GlobalTrend(maxPoints int) ([]CostTrendPoint, error) {
+func (s *Store) GlobalTrend(tenantID int64, maxPoints int) ([]CostTrendPoint, error) {
 	rows, err := s.db.Query(`
 		SELECT reported_at, SUM(cost_high_inr)
 		FROM flow_aggregate
+		WHERE tenant_id = ?
 		GROUP BY reported_at
 		ORDER BY reported_at DESC
 		LIMIT ?
-	`, maxPoints)
+	`, tenantID, maxPoints)
 	if err != nil {
 		return nil, fmt.Errorf("query global trend: %w", err)
 	}
@@ -415,15 +520,15 @@ type CostTrendPoint struct {
 
 // CostTrend returns the total estimated cost at each snapshot time for one
 // cluster, oldest first — the series a trend sparkline plots.
-func (s *Store) CostTrend(clusterID string, maxPoints int) ([]CostTrendPoint, error) {
+func (s *Store) CostTrend(tenantID int64, clusterID string, maxPoints int) ([]CostTrendPoint, error) {
 	rows, err := s.db.Query(`
 		SELECT reported_at, SUM(cost_high_inr)
 		FROM flow_aggregate
-		WHERE cluster_id = ?
+		WHERE tenant_id = ? AND cluster_id = ?
 		GROUP BY reported_at
 		ORDER BY reported_at DESC
 		LIMIT ?
-	`, clusterID, maxPoints)
+	`, tenantID, clusterID, maxPoints)
 	if err != nil {
 		return nil, fmt.Errorf("query cost trend: %w", err)
 	}
@@ -455,13 +560,13 @@ func (s *Store) CostTrend(clusterID string, maxPoints int) ([]CostTrendPoint, er
 // inventing a fiscal-calendar/rollover model nobody asked for.
 const budgetSettingKey = "budget_inr"
 
-// SetBudget stores the user-set budget figure, overwriting any previous
-// value.
-func (s *Store) SetBudget(amountINR float64) error {
+// SetBudget stores one tenant's user-set budget figure, overwriting any
+// previous value for that same tenant only.
+func (s *Store) SetBudget(tenantID int64, amountINR float64) error {
 	_, err := s.db.Exec(
-		`INSERT INTO settings (key, value) VALUES (?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-		budgetSettingKey, strconv.FormatFloat(amountINR, 'f', -1, 64),
+		`INSERT INTO settings (tenant_id, key, value) VALUES (?, ?, ?)
+		 ON CONFLICT(tenant_id, key) DO UPDATE SET value = excluded.value`,
+		tenantID, budgetSettingKey, strconv.FormatFloat(amountINR, 'f', -1, 64),
 	)
 	if err != nil {
 		return fmt.Errorf("set budget: %w", err)
@@ -470,13 +575,14 @@ func (s *Store) SetBudget(amountINR float64) error {
 	return nil
 }
 
-// GetBudget returns the stored budget and whether one has been set at
-// all — a zero budget and "never set" are different states; the frontend
-// treats the latter as "no budget configured" rather than "budget is ₹0."
-func (s *Store) GetBudget() (amountINR float64, isSet bool, err error) {
+// GetBudget returns one tenant's stored budget and whether one has been
+// set at all — a zero budget and "never set" are different states; the
+// frontend treats the latter as "no budget configured" rather than
+// "budget is ₹0."
+func (s *Store) GetBudget(tenantID int64) (amountINR float64, isSet bool, err error) {
 	var raw string
 
-	err = s.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, budgetSettingKey).Scan(&raw)
+	err = s.db.QueryRow(`SELECT value FROM settings WHERE tenant_id = ? AND key = ?`, tenantID, budgetSettingKey).Scan(&raw)
 	if err == sql.ErrNoRows {
 		return 0, false, nil
 	}

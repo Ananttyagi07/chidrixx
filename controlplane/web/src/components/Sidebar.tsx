@@ -1,6 +1,7 @@
 import { type ComponentType } from "react";
 import { motion } from "framer-motion";
 import DecryptedTextRaw from "./DecryptedText";
+import type { Session } from "../session";
 import {
   IconBell,
   IconBulb,
@@ -39,7 +40,17 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "settings", label: "Settings", icon: IconGear, real: true },
 ];
 
-export function Sidebar({ active, onSelect }: { active: string; onSelect: (id: string) => void }) {
+export function Sidebar({
+  active,
+  onSelect,
+  session,
+  onLogout,
+}: {
+  active: string;
+  onSelect: (id: string) => void;
+  session: Session;
+  onLogout: () => void;
+}) {
   return (
     <aside className="sticky top-0 flex h-screen w-60 flex-shrink-0 flex-col justify-between overflow-y-auto border-r border-[var(--border)] bg-[var(--surface)] p-4">
       <div>
@@ -104,12 +115,18 @@ export function Sidebar({ active, onSelect }: { active: string; onSelect: (id: s
         </div>
         <div className="flex items-center gap-2 rounded-xl px-1 py-1">
           <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--accent-wash)] text-xs font-semibold text-[var(--accent)]">
-            AD
+            {session.username.slice(0, 2).toUpperCase() || "??"}
           </div>
-          <div className="min-w-0">
-            <div className="truncate text-xs font-medium">Admin</div>
-            <div className="truncate text-[0.68rem] text-[var(--ink-muted)]">Shared token access</div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-xs font-medium">{session.username || "Unknown"}</div>
+            <div className="truncate text-[0.68rem] capitalize text-[var(--ink-muted)]">{session.role || "unknown role"}</div>
           </div>
+          <button
+            onClick={onLogout}
+            className="flex-shrink-0 rounded-lg px-2 py-1 text-[0.68rem] text-[var(--ink-muted)] hover:bg-[var(--surface-sunken)] hover:text-[var(--ink-secondary)]"
+          >
+            Log out
+          </button>
         </div>
       </div>
     </aside>
