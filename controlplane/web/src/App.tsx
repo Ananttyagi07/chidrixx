@@ -19,6 +19,7 @@ import { InsightsPage } from "./components/InsightsPage";
 import { AutomationsPage } from "./components/AutomationsPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { TeamsPage } from "./components/TeamsPage";
+import { HistoryPage } from "./components/HistoryPage";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { LandingPage } from "./components/LandingPage";
@@ -203,6 +204,10 @@ function Dashboard({ session, onLogout }: { session: Session; onLogout: () => vo
           ) : active === "workloads" ? (
             <motion.div key="workloads" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <WorkloadsPage />
+            </motion.div>
+          ) : active === "history" ? (
+            <motion.div key="history" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <HistoryPage />
             </motion.div>
           ) : active in DATA_PAGES ? (
             <motion.div key={active} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>

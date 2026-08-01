@@ -90,6 +90,19 @@ export interface TeamOwnership {
   team: string;
 }
 
+export interface WorkloadCostPoint {
+  reported_at: string;
+  cost_high: number;
+}
+
+export interface WorkloadGrowth {
+  cluster_id: string;
+  workload: string;
+  trend: WorkloadCostPoint[];
+  delta_inr: number;
+  related_events?: DeployEvent[];
+}
+
 export interface DashboardSummary {
   summary: Summary;
   spend_by_class: ClassSpend[];

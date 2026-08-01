@@ -5,6 +5,7 @@ import type { Session } from "../session";
 import {
   IconBell,
   IconBulb,
+  IconCalendar,
   IconFile,
   IconGear,
   IconGrid,
@@ -37,6 +38,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "savings", label: "Savings Advisor", icon: IconShieldCheck, real: true },
   { id: "forecasting", label: "Forecasting", icon: IconTrendingUp, real: true },
   { id: "anomalies", label: "Anomalies", icon: IconBell, real: true },
+  { id: "history", label: "History", icon: IconCalendar, real: true },
   { id: "reports", label: "Reports", icon: IconFile, real: true },
   { id: "automations", label: "Automations", icon: IconGear, real: true },
   { id: "settings", label: "Settings", icon: IconGear, real: true },

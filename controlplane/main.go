@@ -51,6 +51,7 @@ func main() {
 	api.HandleFunc("/api/v1/dashboard-summary", requireSession(store, handleDashboardSummary(store)))
 	api.HandleFunc("/api/v1/budget", requireSession(store, budgetRoute(store)))
 	api.HandleFunc("/api/v1/teams", requireSession(store, teamsRoute(store)))
+	api.HandleFunc("/api/v1/workload-growth", requireSession(store, handleWorkloadGrowth(store)))
 	api.HandleFunc("/api/v1/auth/me", requireSession(store, handleMe))
 
 	mux := http.NewServeMux()
