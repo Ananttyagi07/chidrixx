@@ -49,9 +49,11 @@ export function ForecastingPage({ data }: { data: DashboardSummary }) {
     <motion.div {...pageMotion} className="flex flex-col gap-4">
       <h2 className="text-lg font-semibold">Forecasting</h2>
       <p className="max-w-xl text-sm text-[var(--ink-muted)]">
-        A least-squares linear fit over the real recent trend, extended forward by the same
-        number of points already observed. Not a calendar-day forecast or an ML model — chidrixx's
+        Holt's linear (double exponential smoothing) trend model, fit over the real recent
+        snapshot history with its parameters chosen by minimizing real in-sample forecast error —
+        not an arbitrary curve fit. Still not a calendar-day forecast or an ML model: chidrixx's
         data is cumulative snapshots at whatever cadence agents ship at, not a fixed time series.
+        The shaded band is a real 80% interval computed from the model's own residual error.
       </p>
       <div className="max-w-2xl">
         <TrendProjectionCard points={data.trend} />

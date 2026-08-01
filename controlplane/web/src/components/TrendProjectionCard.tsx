@@ -1,18 +1,48 @@
 import { motion } from "framer-motion";
 import { Area, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import type { TooltipProps } from "recharts";
+import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import { cardMotion } from "../motion";
 import { formatINR } from "../format";
 import type { CostTrendPoint } from "../types";
+import { holtForecast } from "../forecast";
 
-// A naive linear-regression projection over the real recent trend --
-// deliberately not called "Forecast (next 7 days)" or framed as ML/AI:
-// chidrixx's data is cumulative snapshots at whatever cadence agents
-// happen to ship at, not a calendar-day time series, so a calendar-bound
-// forecast would be a claim this can't back. This just extends the
-// observed slope forward by the same number of points already observed,
-// labeled as exactly what it is.
+// Recharts calls the tooltip formatter for every series present at the
+// hovered point, including the two internal band-stacking series
+// (bandBase/bandWidth) that only exist to draw the shaded area -- this
+// filters those out so the tooltip shows just the two real series.
+function trendTooltipContent({ active, payload, label }: TooltipProps<ValueType, NameType>) {
+  if (!active || !payload) return null;
+  const visible = payload.filter((p) => p.dataKey === "actual" || p.dataKey === "projected");
+  if (visible.length === 0) return null;
+  return (
+    <div
+      style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 11 }}
+      className="px-2 py-1.5"
+    >
+      <div className="mb-1 text-[var(--ink-muted)]">{label}</div>
+      {visible.map((p) => (
+        <div key={p.dataKey}>
+          {p.dataKey === "actual" ? "Actual" : "Projected"}: {formatINR(Number(p.value ?? 0))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Holt's linear (double exponential smoothing) trend model over the real
+// recent snapshot history -- see forecast.ts for why this method and not
+// plain OLS or a seasonal model. Deliberately still not called "Forecast
+// (next 7 days)": chidrixx's data is cumulative snapshots at whatever
+// cadence agents happen to ship at, not a calendar-day time series, so a
+// calendar-bound forecast would be a claim this can't back. The shaded
+// band is a real 80% interval computed from the model's own in-sample
+// residual error, not a cosmetic margin.
 export function TrendProjectionCard({ points }: { points: CostTrendPoint[] }) {
-  if (points.length < 2) {
+  const n = points.length;
+  const result = holtForecast(points, Math.min(n, 10));
+
+  if (!result) {
     return (
       <motion.div
         {...cardMotion}
@@ -22,43 +52,35 @@ export function TrendProjectionCard({ points }: { points: CostTrendPoint[] }) {
           Trend projection
         </div>
         <div className="flex flex-1 items-center justify-center text-center text-sm text-[var(--ink-muted)]">
-          Needs at least 2 real snapshots to fit a trend line.
+          Needs at least 3 real snapshots to fit a trend model.
         </div>
       </motion.div>
     );
   }
 
-  const n = points.length;
-  const xs = points.map((_, i) => i);
   const ys = points.map((p) => p.CostHigh);
-  const meanX = xs.reduce((a, b) => a + b, 0) / n;
-  const meanY = ys.reduce((a, b) => a + b, 0) / n;
-  let num = 0;
-  let den = 0;
-  for (let i = 0; i < n; i++) {
-    num += (xs[i] - meanX) * (ys[i] - meanY);
-    den += (xs[i] - meanX) ** 2;
-  }
-  const slope = den === 0 ? 0 : num / den;
-  const intercept = meanY - slope * meanX;
-
-  const projectionCount = Math.min(n, 10);
   const lastReal = Math.max(ys[n - 1], 0);
 
-  const chartData = points.map((p, i) => ({
+  const chartData: Array<{ label: string; actual: number | null; projected: number | null; bandBase: number | null; bandWidth: number | null }> = points.map((p, i) => ({
     label: new Date(p.ReportedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     actual: p.CostHigh,
     projected: i === n - 1 ? p.CostHigh : null,
+    bandBase: null,
+    bandWidth: null,
   }));
 
-  for (let i = 1; i <= projectionCount; i++) {
-    const x = n - 1 + i;
-    const projected = Math.max(slope * x + intercept, 0);
-    chartData.push({ label: `+${i}`, actual: null as unknown as number, projected });
+  for (const f of result.forecast) {
+    chartData.push({
+      label: `+${f.h}`,
+      actual: null,
+      projected: f.forecast,
+      bandBase: f.lower,
+      bandWidth: f.upper - f.lower,
+    });
   }
 
-  const projectedEnd = chartData[chartData.length - 1].projected as number;
-  const direction = projectedEnd > lastReal ? "up" : projectedEnd < lastReal ? "down" : "flat";
+  const last = result.forecast[result.forecast.length - 1];
+  const direction = last.forecast > lastReal ? "up" : last.forecast < lastReal ? "down" : "flat";
 
   return (
     <motion.div
@@ -69,7 +91,8 @@ export function TrendProjectionCard({ points }: { points: CostTrendPoint[] }) {
         Trend projection
       </div>
       <div className="mb-2 text-[0.68rem] text-[var(--ink-muted)]">
-        Linear fit over the last {n} snapshots — not a calendar-day forecast.
+        Holt's trend model (α={result.alpha.toFixed(1)}, β={result.beta.toFixed(1)}, fit to the last {n} snapshots) —
+        not a calendar-day forecast. Shaded band is an 80% interval from the model's own residual error.
       </div>
       <div className="h-32">
         <ResponsiveContainer width="100%" height="100%">
@@ -82,9 +105,16 @@ export function TrendProjectionCard({ points }: { points: CostTrendPoint[] }) {
             </defs>
             <XAxis dataKey="label" hide />
             <YAxis hide domain={[0, "auto"]} />
-            <Tooltip
-              contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 11 }}
-              formatter={(v: number, name: string) => [formatINR(v), name === "actual" ? "Actual" : "Projected"]}
+            <Tooltip content={trendTooltipContent} />
+            <Area type="monotone" dataKey="bandBase" stroke="none" fill="transparent" stackId="band" connectNulls />
+            <Area
+              type="monotone"
+              dataKey="bandWidth"
+              stroke="none"
+              fill="var(--series-orange)"
+              fillOpacity={0.12}
+              stackId="band"
+              connectNulls
             />
             <Area type="monotone" dataKey="actual" stroke="var(--accent)" strokeWidth={2} fill="url(#actualFill)" dot={false} connectNulls={false} />
             <Line
@@ -101,7 +131,10 @@ export function TrendProjectionCard({ points }: { points: CostTrendPoint[] }) {
       </div>
       <div className="mt-2 flex items-center justify-between text-xs">
         <span className="text-[var(--ink-secondary)]">
-          Projected: <span className="font-mono tabular-nums">{formatINR(Math.max(projectedEnd, 0))}</span>
+          Projected: <span className="font-mono tabular-nums">{formatINR(Math.max(last.forecast, 0))}</span>{" "}
+          <span className="text-[var(--ink-muted)]">
+            ({formatINR(last.lower)}–{formatINR(last.upper)})
+          </span>
         </span>
         <span
           className={
