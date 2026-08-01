@@ -10,6 +10,7 @@ import { TopFixesTable } from "./components/TopFixesTable";
 import { ComingSoonCard, ComingSoonPage } from "./components/ComingSoon";
 import { BudgetCard } from "./components/BudgetCard";
 import { AnomalyCard } from "./components/AnomalyCard";
+import { TrendProjectionCard } from "./components/TrendProjectionCard";
 import { Sidebar, NAV_ITEMS } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { LandingPage } from "./components/LandingPage";
@@ -235,7 +236,7 @@ function Dashboard() {
 
                   <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                     <AnomalyCard anomalies={data.anomalies} />
-                    <ComingSoonCard title="Forecast (next 7 days)" note="No forecasting model exists." />
+                    <TrendProjectionCard points={data.trend} />
                     <BudgetCard spentINR={data.summary.TotalCostHighINR} />
                   </div>
 
