@@ -1,6 +1,6 @@
 # chidrixx — Project Status
 
-_Last updated: 2026-08-01_
+_Last updated: 2026-08-01 (multi-cloud spend, cluster topology, carbon estimate)_
 
 This is the honest, complete picture: what's real and verified, what's
 explicitly not built (and why), and what's actually left to do. Every claim
@@ -126,6 +126,27 @@ Two components, two Go modules:
     Advisor all now route to their real content (they briefly still said
     "Coming soon" after the features above were built as Overview cards —
     caught and fixed the same session).
+  - **The last 3 Overview placeholders, now real:**
+    - **Cluster topology** (was "Multi-cloud topology") — every finding
+      already carried the agent's real price-book `Cloud`/`Region`, but it
+      was dropped at the shipper and never reached the control plane.
+      Threaded it end-to-end: `Finding` struct (agent + control plane) →
+      shipper wire format → `flow_aggregate` schema migration → dashboard
+      API. Shows each cluster's real cloud/region + cost. Pre-existing
+      agents that haven't upgraded fold into an honest "unknown" bucket
+      instead of breaking or guessing.
+    - **Spend by provider** — new `SpendByCloud()` query groups real spend
+      by the same cloud/region data, rendered as a real donut. Verified
+      live with a genuine two-cluster (aws/ap-south-1, gcp/asia-south1)
+      ingest: correctly split 71.1%/28.9%, not simulated.
+    - **Carbon footprint** — still no real carbon-intensity data source
+      (no cloud provider API, no grid-carbon API). Per an explicit choice
+      you made over leaving it "Coming soon," it's now a labeled rough
+      estimate: real measured bytes × a cited industry-average coefficient
+      (0.06 kWh/GB × 475 g CO2e/kWh global grid average), with the exact
+      formula and a "Not measured" caveat always visible in the card —
+      same honesty pattern as the price book's own "list prices, not
+      negotiated rates" disclaimer.
 
 ### Real bugs found and fixed during this work (kept for the record)
 
@@ -164,11 +185,6 @@ Two components, two Go modules:
 These are honest placeholders — visually present where relevant, clearly
 labeled "Coming soon," never filled with invented numbers:
 
-- **Multi-cloud cost attribution / "Spend by provider"** — chidrixx prices
-  against one price book (AWS) today. A real multi-cloud view needs
-  multi-provider ingestion this doesn't have.
-- **Carbon footprint** — no carbon-cost model exists or is planned to be
-  fabricated.
 - **A real forecasting/ML model** — only the honest linear-projection exists
   (§3). A genuine demand forecast would need a real time-series model and
   calendar-aligned data this agent doesn't collect.
@@ -188,7 +204,7 @@ labeled "Coming soon," never filled with invented numbers:
 | # | Item | Who | Effort |
 |---|---|---|---|
 | 1 | Flip 4 GHCR packages to public (web UI, listed in §4) | **You** | 5 min |
-| 2 | Real multi-cloud price-book ingestion, if wanted | Both | Large — new data source, new agent config surface |
+| 2 | A second real price book (GCP/Azure), if wanted | Both | Medium — the plumbing (cloud/region grouping end-to-end) is done; every live agent still runs the same AWS price book today, so "Spend by provider" correctly shows one 100% slice until a second cloud is actually configured |
 | 3 | A genuine forecasting model (if the linear projection isn't enough) | Both | Large — needs a real time-series approach and more historical data than currently retained |
 | 4 | Build out Insights / Explorer / Workloads / Reports / Automations / Settings | Both | Medium each — some (Workloads, Reports) are mostly data already available; Automations implies a real remediation-execution engine, which is a bigger scope decision |
 | 5 | Multi-tenant accounts / real RBAC | Both | Large — a genuine new subsystem, only worth it if this becomes a multi-customer product rather than a single-operator tool |
