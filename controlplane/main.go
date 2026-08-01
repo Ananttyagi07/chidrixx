@@ -36,6 +36,7 @@ func main() {
 	api.HandleFunc("/api/v1/ingest", handleIngest(store))
 	api.HandleFunc("/api/v1/findings", handleFindingsAPI(store))
 	api.HandleFunc("/api/v1/dashboard-summary", handleDashboardSummary(store))
+	api.HandleFunc("/api/v1/budget", handleBudget(store))
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", requireToken(token, api))

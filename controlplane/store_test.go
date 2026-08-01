@@ -314,3 +314,40 @@ func TestCostTrendOrdersOldestFirst(t *testing.T) {
 		t.Fatalf("unexpected trend values: %+v", trend)
 	}
 }
+
+func TestBudgetUnsetThenSetAndOverwrite(t *testing.T) {
+	s := testStore(t)
+
+	_, isSet, err := s.GetBudget()
+	if err != nil {
+		t.Fatalf("GetBudget (unset): %v", err)
+	}
+	if isSet {
+		t.Fatalf("expected no budget set initially")
+	}
+
+	if err := s.SetBudget(1000); err != nil {
+		t.Fatalf("SetBudget: %v", err)
+	}
+
+	amount, isSet, err := s.GetBudget()
+	if err != nil {
+		t.Fatalf("GetBudget: %v", err)
+	}
+	if !isSet || amount != 1000 {
+		t.Fatalf("expected (1000, true), got (%v, %v)", amount, isSet)
+	}
+
+	// Setting again overwrites rather than erroring or duplicating.
+	if err := s.SetBudget(2500); err != nil {
+		t.Fatalf("SetBudget (overwrite): %v", err)
+	}
+
+	amount, isSet, err = s.GetBudget()
+	if err != nil {
+		t.Fatalf("GetBudget (after overwrite): %v", err)
+	}
+	if !isSet || amount != 2500 {
+		t.Fatalf("expected (2500, true) after overwrite, got (%v, %v)", amount, isSet)
+	}
+}

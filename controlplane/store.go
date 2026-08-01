@@ -4,6 +4,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,6 +46,11 @@ CREATE TABLE IF NOT EXISTS flow_aggregate (
 	fix_manifest             TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_flow_aggregate_cluster_time ON flow_aggregate(cluster_id, reported_at);
+
+CREATE TABLE IF NOT EXISTS settings (
+	key   TEXT PRIMARY KEY,
+	value TEXT NOT NULL
+);
 `
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
@@ -364,4 +370,48 @@ func (s *Store) CostTrend(clusterID string, maxPoints int) ([]CostTrendPoint, er
 	}
 
 	return out, rows.Err()
+}
+
+// budgetSettingKey is the settings table key for the one real, user-set
+// budget figure this control plane supports: a single overall INR ceiling
+// compared against real total spend. Not per-cluster, not per-period —
+// deliberately as simple as "budget status" can honestly be without
+// inventing a fiscal-calendar/rollover model nobody asked for.
+const budgetSettingKey = "budget_inr"
+
+// SetBudget stores the user-set budget figure, overwriting any previous
+// value.
+func (s *Store) SetBudget(amountINR float64) error {
+	_, err := s.db.Exec(
+		`INSERT INTO settings (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		budgetSettingKey, strconv.FormatFloat(amountINR, 'f', -1, 64),
+	)
+	if err != nil {
+		return fmt.Errorf("set budget: %w", err)
+	}
+
+	return nil
+}
+
+// GetBudget returns the stored budget and whether one has been set at
+// all — a zero budget and "never set" are different states; the frontend
+// treats the latter as "no budget configured" rather than "budget is ₹0."
+func (s *Store) GetBudget() (amountINR float64, isSet bool, err error) {
+	var raw string
+
+	err = s.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, budgetSettingKey).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("get budget: %w", err)
+	}
+
+	amountINR, err = strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, false, fmt.Errorf("parse stored budget %q: %w", raw, err)
+	}
+
+	return amountINR, true, nil
 }
