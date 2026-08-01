@@ -50,10 +50,18 @@ export interface ClusterSummaryView {
   trend: CostTrendPoint[];
 }
 
+export interface AnomalyPoint {
+  cluster_id: string;
+  previous_cost_inr: number;
+  current_cost_inr: number;
+  growth_ratio: number;
+}
+
 export interface DashboardSummary {
   summary: Summary;
   spend_by_class: ClassSpend[];
   trend: CostTrendPoint[];
   clusters: ClusterSummaryView[];
   top_fixes: FindingRow[];
+  anomalies: AnomalyPoint[];
 }

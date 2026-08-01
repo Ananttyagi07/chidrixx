@@ -9,6 +9,7 @@ import { ClusterCard } from "./components/ClusterCard";
 import { TopFixesTable } from "./components/TopFixesTable";
 import { ComingSoonCard, ComingSoonPage } from "./components/ComingSoon";
 import { BudgetCard } from "./components/BudgetCard";
+import { AnomalyCard } from "./components/AnomalyCard";
 import { Sidebar, NAV_ITEMS } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { LandingPage } from "./components/LandingPage";
@@ -233,7 +234,7 @@ function Dashboard() {
                   </div>
 
                   <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                    <ComingSoonCard title="Anomaly detection" note="No cross-snapshot growth comparison in the dashboard yet." />
+                    <AnomalyCard anomalies={data.anomalies} />
                     <ComingSoonCard title="Forecast (next 7 days)" note="No forecasting model exists." />
                     <BudgetCard spentINR={data.summary.TotalCostHighINR} />
                   </div>

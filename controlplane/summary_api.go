@@ -25,6 +25,7 @@ type dashboardSummaryResponse struct {
 	Trend        []CostTrendPoint     `json:"trend"`
 	Clusters     []clusterSummaryView `json:"clusters"`
 	TopFixes     []FindingRow         `json:"top_fixes"`
+	Anomalies    []Anomaly            `json:"anomalies"`
 }
 
 // handleDashboardSummary serves the aggregate JSON the React dashboard
@@ -95,12 +96,20 @@ func handleDashboardSummary(store *Store) http.HandlerFunc {
 			topFixes = topFixes[:10]
 		}
 
+		anomalies, err := detectAnomalies(store)
+		if err != nil {
+			log.Printf("dashboard-summary: anomalies: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
 		resp := dashboardSummaryResponse{
 			Summary:      summary,
 			SpendByClass: spendByClass,
 			Trend:        trend,
 			Clusters:     clusterViews,
 			TopFixes:     topFixes,
+			Anomalies:    anomalies,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
