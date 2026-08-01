@@ -214,6 +214,41 @@ labeled "Coming soon," never filled with invented numbers:
 
 ---
 
+## 7. Future vision — not started, direction only
+
+Everything above is either shipped or a scoped, estimateable task. This
+section is different: it's where the project is headed next, not
+something in progress. Marking it clearly as vision, not a roadmap
+commitment with dates, so it doesn't get conflated with the punch list
+above.
+
+- **A domain-specialized LLM, fine-tuned on eBPF / deep networking /
+  kernel internals.** The plan is to fine-tune a model specifically on
+  eBPF program semantics, Linux networking internals (netfilter, tc,
+  cgroups, the network namespace/veth/CNI stack), and kernel-level
+  traffic behavior — not a general coding assistant repurposed for this
+  domain. Intended use once ready: interpreting a cluster's real flow
+  data and fix-engine output in natural language, reasoning about why a
+  given path was classified the way it was, and eventually helping
+  author or review the `NetworkPolicy` fixes chidrixx already generates
+  mechanically today — all grounded in the agent's own real, measured
+  data, not invented network theory.
+- **Later SaaS integration.** Once that model is trained and validated,
+  the intent is to surface it inside the control plane itself — e.g. an
+  assistant panel that can answer cluster-specific questions using the
+  real ingested findings as context, rather than a bolt-on chatbot with
+  no access to actual cluster state. This depends on the multi-tenant
+  work in punch-list item #5 landing first, since a shared model
+  reasoning over multiple customers' traffic needs real tenant isolation
+  before it can ship.
+- **Why this order**: the fine-tuning work is happening in parallel with
+  the product work above, but the SaaS integration is deliberately
+  sequenced *after* real accounts/RBAC exist — piping a real customer's
+  live traffic data into a shared model without tenant isolation would be
+  a genuine data-boundary problem, not just a nice-to-have gap.
+
+---
+
 ## Bottom line
 
 The agent's core claims (byte-accurate attribution, real topology
