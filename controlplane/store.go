@@ -45,7 +45,9 @@ CREATE TABLE IF NOT EXISTS flow_aggregate (
 	fix_hint                 TEXT,
 	fix_manifest             TEXT,
 	cloud                    TEXT,
-	region                   TEXT
+	region                   TEXT,
+	savings_low_inr          REAL,
+	savings_high_inr         REAL
 );
 CREATE INDEX IF NOT EXISTS idx_flow_aggregate_cluster_time ON flow_aggregate(cluster_id, reported_at);
 
@@ -134,6 +136,16 @@ CREATE INDEX IF NOT EXISTS idx_deploy_event_tenant_cluster_time ON deploy_event(
 		}
 	}
 
+	// savings_low_inr/savings_high_inr were added once real optimization
+	// recommendations shipped -- same migration pattern again.
+	for _, col := range []string{"savings_low_inr", "savings_high_inr"} {
+		if _, err := db.Exec(`ALTER TABLE flow_aggregate ADD COLUMN ` + col + ` REAL`); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column name") {
+			db.Close()
+			return nil, fmt.Errorf("migrate %s column: %w", col, err)
+		}
+	}
+
 	// tenant_id was added once real multi-tenant isolation shipped. Every
 	// pre-existing row (from before tenants existed at all) backfills to
 	// tenant 1 -- main.go's bootstrap always creates the first tenant with
@@ -211,8 +223,8 @@ func (s *Store) Ingest(tenantID int64, clusterID string, findings []Finding) err
 		INSERT INTO flow_aggregate
 			(tenant_id, cluster_id, reported_at, src_workload, dst_workload_or_endpoint,
 			 path_class, confidence, bytes_tx, bytes_rx, cost_low_inr, cost_high_inr, fix_hint, fix_manifest,
-			 cloud, region)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 cloud, region, savings_low_inr, savings_high_inr)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		tx.Rollback()
@@ -225,7 +237,7 @@ func (s *Store) Ingest(tenantID int64, clusterID string, findings []Finding) err
 			tenantID, clusterID, reportedAt, f.Source, f.Destination,
 			f.PathClass, f.Confidence, f.BytesTx, f.BytesRx,
 			f.CostLowINR, f.CostHighINR, f.FixHint, f.FixManifest,
-			f.Cloud, f.Region,
+			f.Cloud, f.Region, f.SavingsLowINR, f.SavingsHighINR,
 		); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("insert finding: %w", err)
@@ -316,7 +328,7 @@ func (s *Store) LatestFindings(tenantID int64, limit int) ([]FindingRow, error) 
 		SELECT fa.cluster_id, fa.reported_at, fa.src_workload, fa.dst_workload_or_endpoint,
 		       fa.path_class, fa.confidence, fa.bytes_tx, fa.bytes_rx,
 		       fa.cost_low_inr, fa.cost_high_inr, fa.fix_hint, fa.fix_manifest,
-		       fa.cloud, fa.region
+		       fa.cloud, fa.region, fa.savings_low_inr, fa.savings_high_inr
 		FROM flow_aggregate fa
 		JOIN latest l ON fa.cluster_id = l.cluster_id AND fa.reported_at = l.max_time
 		WHERE fa.tenant_id = ?
@@ -333,12 +345,13 @@ func (s *Store) LatestFindings(tenantID int64, limit int) ([]FindingRow, error) 
 		var r FindingRow
 		var reportedAt int64
 		var fixHint, fixManifest, cloud, region sql.NullString
+		var savingsLow, savingsHigh sql.NullFloat64
 
 		if err := rows.Scan(
 			&r.ClusterID, &reportedAt, &r.Source, &r.Destination,
 			&r.PathClass, &r.Confidence, &r.BytesTx, &r.BytesRx,
 			&r.CostLowINR, &r.CostHighINR, &fixHint, &fixManifest,
-			&cloud, &region,
+			&cloud, &region, &savingsLow, &savingsHigh,
 		); err != nil {
 			return nil, fmt.Errorf("scan finding row: %w", err)
 		}
@@ -348,6 +361,8 @@ func (s *Store) LatestFindings(tenantID int64, limit int) ([]FindingRow, error) 
 		r.FixManifest = fixManifest.String
 		r.Cloud = cloud.String
 		r.Region = region.String
+		r.SavingsLowINR = savingsLow.Float64
+		r.SavingsHighINR = savingsHigh.Float64
 		out = append(out, r)
 	}
 

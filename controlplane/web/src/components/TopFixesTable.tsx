@@ -27,6 +27,7 @@ export function TopFixesTable({
             <th className="py-2 pr-3 font-normal">Path</th>
             <th className="py-2 pr-3 font-normal">Confidence</th>
             <th className="py-2 pr-3 text-right font-normal">Cost (INR)</th>
+            <th className="py-2 pr-3 text-right font-normal">Potential savings</th>
             <th className="py-2 font-normal">Fix</th>
           </tr>
         </thead>
@@ -67,6 +68,15 @@ function FixRow({ finding: f, index }: { finding: FindingRow; index: number }) {
         <td className="py-2 pr-3 text-right font-mono tabular-nums">
           {formatINR(f.cost_low_inr)}–{formatINR(f.cost_high_inr)}
         </td>
+        <td className="py-2 pr-3 text-right font-mono tabular-nums">
+          {f.savings_high_inr > 0 ? (
+            <span className="text-[var(--status-good)]">
+              {formatINR(f.savings_low_inr)}–{formatINR(f.savings_high_inr)}
+            </span>
+          ) : (
+            <span className="text-[var(--ink-muted)]">—</span>
+          )}
+        </td>
         <td className="max-w-[16rem] py-2 text-xs text-[var(--ink-secondary)]">
           {f.fix_hint}
           {f.fix_manifest && (
@@ -87,7 +97,7 @@ function FixRow({ finding: f, index }: { finding: FindingRow; index: number }) {
             exit={{ opacity: 0 }}
             className="border-b border-[var(--border)]"
           >
-            <td colSpan={7} className="bg-[var(--page)] p-3">
+            <td colSpan={8} className="bg-[var(--page)] p-3">
               <motion.pre
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: "auto", opacity: 1 }}

@@ -15,18 +15,20 @@ import (
 // agent's own Finding struct (report.go) doesn't have to match another
 // module's JSON tags field-for-field.
 type shipperFinding struct {
-	Source      string  `json:"source"`
-	Destination string  `json:"destination"`
-	PathClass   string  `json:"path_class"`
-	Confidence  string  `json:"confidence"`
-	BytesTx     uint64  `json:"bytes_tx"`
-	BytesRx     uint64  `json:"bytes_rx"`
-	CostLowINR  float64 `json:"cost_low_inr"`
-	CostHighINR float64 `json:"cost_high_inr"`
-	FixHint     string  `json:"fix_hint"`
-	FixManifest string  `json:"fix_manifest"`
-	Cloud       string  `json:"cloud"`
-	Region      string  `json:"region"`
+	Source         string  `json:"source"`
+	Destination    string  `json:"destination"`
+	PathClass      string  `json:"path_class"`
+	Confidence     string  `json:"confidence"`
+	BytesTx        uint64  `json:"bytes_tx"`
+	BytesRx        uint64  `json:"bytes_rx"`
+	CostLowINR     float64 `json:"cost_low_inr"`
+	CostHighINR    float64 `json:"cost_high_inr"`
+	FixHint        string  `json:"fix_hint"`
+	FixManifest    string  `json:"fix_manifest"`
+	Cloud          string  `json:"cloud"`
+	Region         string  `json:"region"`
+	SavingsLowINR  float64 `json:"savings_low_inr"`
+	SavingsHighINR float64 `json:"savings_high_inr"`
 }
 
 type shipperRequest struct {
@@ -68,18 +70,20 @@ func (s *Shipper) Ship(ctx context.Context, findings []*Finding, events []Deploy
 	wire := make([]shipperFinding, 0, len(findings))
 	for _, f := range findings {
 		wire = append(wire, shipperFinding{
-			Source:      f.Source,
-			Destination: f.Destination,
-			PathClass:   string(f.Class),
-			Confidence:  f.Confidence,
-			BytesTx:     f.BytesTx,
-			BytesRx:     f.BytesRx,
-			CostLowINR:  f.CostLowINR,
-			CostHighINR: f.CostHighINR,
-			FixHint:     f.FixHint,
-			FixManifest: f.FixManifest,
-			Cloud:       f.Cloud,
-			Region:      f.Region,
+			Source:         f.Source,
+			Destination:    f.Destination,
+			PathClass:      string(f.Class),
+			Confidence:     f.Confidence,
+			BytesTx:        f.BytesTx,
+			BytesRx:        f.BytesRx,
+			CostLowINR:     f.CostLowINR,
+			CostHighINR:    f.CostHighINR,
+			FixHint:        f.FixHint,
+			FixManifest:    f.FixManifest,
+			Cloud:          f.Cloud,
+			Region:         f.Region,
+			SavingsLowINR:  f.SavingsLowINR,
+			SavingsHighINR: f.SavingsHighINR,
 		})
 	}
 

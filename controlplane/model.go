@@ -8,18 +8,20 @@ import "time"
 // (src_workload, dst_workload_or_endpoint, path_class, bytes, cost bounds,
 // confidence) closely enough that the ingest API never has to reshape it.
 type Finding struct {
-	Source      string  `json:"source"`
-	Destination string  `json:"destination"`
-	PathClass   string  `json:"path_class"`
-	Confidence  string  `json:"confidence"`
-	BytesTx     uint64  `json:"bytes_tx"`
-	BytesRx     uint64  `json:"bytes_rx"`
-	CostLowINR  float64 `json:"cost_low_inr"`
-	CostHighINR float64 `json:"cost_high_inr"`
-	FixHint     string  `json:"fix_hint"`
-	FixManifest string  `json:"fix_manifest"`
-	Cloud       string  `json:"cloud"`
-	Region      string  `json:"region"`
+	Source         string  `json:"source"`
+	Destination    string  `json:"destination"`
+	PathClass      string  `json:"path_class"`
+	Confidence     string  `json:"confidence"`
+	BytesTx        uint64  `json:"bytes_tx"`
+	BytesRx        uint64  `json:"bytes_rx"`
+	CostLowINR     float64 `json:"cost_low_inr"`
+	CostHighINR    float64 `json:"cost_high_inr"`
+	FixHint        string  `json:"fix_hint"`
+	FixManifest    string  `json:"fix_manifest"`
+	Cloud          string  `json:"cloud"`
+	Region         string  `json:"region"`
+	SavingsLowINR  float64 `json:"savings_low_inr"`
+	SavingsHighINR float64 `json:"savings_high_inr"`
 }
 
 // DeployEvent mirrors the agent's own DeployEvent (agent/cmd/kharcha/deployevents.go)

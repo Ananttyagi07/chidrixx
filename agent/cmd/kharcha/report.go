@@ -60,6 +60,15 @@ type Finding struct {
 	BytesRx     uint64
 	CostLowINR  float64
 	CostHighINR float64
+
+	// SavingsLowINR/SavingsHighINR are the real re-priced delta between
+	// this finding's actual cost and what the same bytes would cost at
+	// the realistic cheaper class its own FixHint describes (see
+	// pricing.go's optimizationTarget) -- zero when no such target class
+	// exists (e.g. INTERNET_EGRESS, whose real fix is usage reduction,
+	// not reclassification, so there's nothing honest to reprice against).
+	SavingsLowINR  float64
+	SavingsHighINR float64
 }
 
 // indentManifest prefixes each line of a YAML manifest for CLI display so
@@ -387,6 +396,12 @@ func (a *Aggregate) Add(
 	low, high := a.priceBook.CostINR(class, confidence, tx+rx)
 	f.CostLowINR += low
 	f.CostHighINR += high
+
+	if target, ok := optimizationTarget(class); ok {
+		targetLow, targetHigh := a.priceBook.CostINR(target, confidence, tx+rx)
+		f.SavingsLowINR += low - targetLow
+		f.SavingsHighINR += high - targetHigh
+	}
 }
 
 func boolStatus(v bool) string {

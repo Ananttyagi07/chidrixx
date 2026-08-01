@@ -164,9 +164,14 @@ function Dashboard({ session, onLogout }: { session: Session; onLogout: () => vo
       }));
   }, [data]);
 
+  // Real re-priced savings (agent/cmd/kharcha/pricing.go's optimizationTarget):
+  // the same bytes priced at the realistic cheaper class each fix hint
+  // actually describes, not "eliminate this traffic entirely" -- a finding
+  // whose real fix is usage reduction (INTERNET_EGRESS) contributes 0 here,
+  // not its full cost.
   const potentialSavings = useMemo(() => {
     if (!data) return 0;
-    return data.top_fixes.reduce((s, f) => s + f.cost_high_inr, 0);
+    return data.top_fixes.reduce((s, f) => s + f.savings_high_inr, 0);
   }, [data]);
 
   return (

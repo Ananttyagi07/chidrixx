@@ -15,6 +15,8 @@ export interface Finding {
   fix_manifest: string;
   cloud: string;
   region: string;
+  savings_low_inr: number;
+  savings_high_inr: number;
 }
 
 export interface FindingRow extends Finding {

@@ -34,13 +34,15 @@ func TestShipperWireFormatMatchesControlPlaneContract(t *testing.T) {
 	findings := []*Finding{
 		{
 			Source: "ns/app", Destination: "8.8.8.8",
-			Class: PathInternetEgress, Confidence: ConfHigh,
+			Class: PathCrossAZ, Confidence: ConfHigh,
 			BytesTx: 100, BytesRx: 200,
 			CostLowINR: 1.5, CostHighINR: 2.5,
-			FixHint:     "cache or compress it",
-			FixManifest: "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\n",
-			Cloud:       "aws",
-			Region:      "ap-south-1",
+			FixHint:        "co-locate these two workloads in the same zone",
+			FixManifest:    "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\n",
+			Cloud:          "aws",
+			Region:         "ap-south-1",
+			SavingsLowINR:  1.0,
+			SavingsHighINR: 2.0,
 		},
 	}
 
@@ -64,13 +66,15 @@ func TestShipperWireFormatMatchesControlPlaneContract(t *testing.T) {
 	f := fs[0].(map[string]any)
 	for key, want := range map[string]any{
 		"source": "ns/app", "destination": "8.8.8.8",
-		"path_class": "INTERNET_EGRESS", "confidence": "high",
+		"path_class": "CROSS_AZ", "confidence": "high",
 		"bytes_tx": float64(100), "bytes_rx": float64(200),
 		"cost_low_inr": 1.5, "cost_high_inr": 2.5,
-		"fix_hint":     "cache or compress it",
-		"fix_manifest": "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\n",
-		"cloud":        "aws",
-		"region":       "ap-south-1",
+		"fix_hint":         "co-locate these two workloads in the same zone",
+		"fix_manifest":     "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\n",
+		"cloud":            "aws",
+		"region":           "ap-south-1",
+		"savings_low_inr":  1.0,
+		"savings_high_inr": 2.0,
 	} {
 		if f[key] != want {
 			t.Errorf("field %s = %v, want %v", key, f[key], want)

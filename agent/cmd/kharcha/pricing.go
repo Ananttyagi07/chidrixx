@@ -49,6 +49,35 @@ func LoadPriceBook(path string) (*PriceBook, error) {
 	return &pb, nil
 }
 
+// optimizationTarget names the realistic cheaper path class each class's
+// own fix hint (report.go's fixHints map) actually points at -- "move
+// Redis to the same AZ" means CROSS_AZ really becomes SAME_AZ if it's
+// applied, not some unspecified improvement. Used to turn a fix hint into
+// a real re-priced savings estimate: the same bytes, priced at the class
+// the fix would realistically produce, not a fabricated "eliminate this
+// traffic entirely" number.
+//
+// INTERNET_EGRESS deliberately has no target here: its own fix hint is
+// "confirm this needs to leave the cluster; cache or compress it" --
+// usage reduction, not a cheaper path class to reprice against. Claiming
+// a specific rupee "savings" for an unknown amount of caching/compression
+// would be exactly the false-precision this price book's own bands exist
+// to avoid.
+func optimizationTarget(class PathClass) (PathClass, bool) {
+	switch class {
+	case PathCrossAZ:
+		return PathSameAZ, true
+	case PathCrossRegion:
+		return PathCrossAZ, true
+	case PathNATEgress:
+		return PathPrivateOffCluster, true
+	case PathManagedService:
+		return PathSameAZ, true
+	default:
+		return "", false
+	}
+}
+
 // CostINR converts bytes moved on a classified path into a [low, high] INR
 // range, widening the band around lower-confidence classifications instead
 // of stating a false-precision single number (build manual §12, "never a

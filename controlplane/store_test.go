@@ -94,6 +94,42 @@ func TestFixManifestRoundTrips(t *testing.T) {
 	}
 }
 
+func TestSavingsEstimateRoundTrips(t *testing.T) {
+	s := testStore(t)
+	tenantID := testTenant(t, s)
+
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{
+		{Source: "ns/app", Destination: "ns/redis", PathClass: "CROSS_AZ", Confidence: "high",
+			CostHighINR: 12, SavingsLowINR: 8.5, SavingsHighINR: 10.2},
+		// INTERNET_EGRESS has no real optimization target -- zero savings
+		// is the honest value, not an omitted/null field.
+		{Source: "ns/app", Destination: "1.1.1.1", PathClass: "INTERNET_EGRESS", Confidence: "high",
+			CostHighINR: 5, SavingsLowINR: 0, SavingsHighINR: 0},
+	}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	findings, err := s.LatestFindings(tenantID, 10)
+	if err != nil {
+		t.Fatalf("LatestFindings: %v", err)
+	}
+	if len(findings) != 2 {
+		t.Fatalf("expected 2 findings, got %d", len(findings))
+	}
+
+	byClass := make(map[string]FindingRow)
+	for _, f := range findings {
+		byClass[f.PathClass] = f
+	}
+
+	if got := byClass["CROSS_AZ"]; got.SavingsLowINR != 8.5 || got.SavingsHighINR != 10.2 {
+		t.Errorf("CROSS_AZ savings didn't round-trip: %+v", got)
+	}
+	if got := byClass["INTERNET_EGRESS"]; got.SavingsLowINR != 0 || got.SavingsHighINR != 0 {
+		t.Errorf("INTERNET_EGRESS savings should be 0, got: %+v", got)
+	}
+}
+
 // TestOpenStoreMigratesExistingDatabaseWithoutFixManifestColumn guards the
 // real gap that would otherwise bite anyone with a control plane already
 // deployed before this column existed: CREATE TABLE IF NOT EXISTS is a

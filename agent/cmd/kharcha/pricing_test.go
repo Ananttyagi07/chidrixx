@@ -47,3 +47,38 @@ func TestRealPriceBooksLoad(t *testing.T) {
 		}
 	}
 }
+
+func TestOptimizationTargetIsAlwaysCheaperInRealPriceBooks(t *testing.T) {
+	books := []string{"../../../pricebook/aws.yaml", "../../../pricebook/gcp.yaml"}
+
+	for _, path := range books {
+		pb, err := LoadPriceBook(path)
+		if err != nil {
+			t.Fatalf("LoadPriceBook(%s): %v", path, err)
+		}
+
+		for _, class := range []PathClass{PathCrossAZ, PathCrossRegion, PathNATEgress, PathManagedService} {
+			target, ok := optimizationTarget(class)
+			if !ok {
+				t.Fatalf("expected an optimization target for %s", class)
+			}
+
+			_, currentHigh := pb.CostINR(class, ConfHigh, 1e9)
+			_, targetHigh := pb.CostINR(target, ConfHigh, 1e9)
+
+			if targetHigh > currentHigh {
+				t.Errorf("%s: optimizationTarget(%s) = %s costs more (%v) than the original (%v) -- not a real optimization",
+					path, class, target, targetHigh, currentHigh)
+			}
+		}
+	}
+}
+
+func TestOptimizationTargetHasNoneForInternetEgress(t *testing.T) {
+	// INTERNET_EGRESS's real fix is usage reduction (cache/compress), not
+	// a cheaper path class to reprice against -- claiming a specific
+	// rupee savings here would be fabricated precision.
+	if _, ok := optimizationTarget(PathInternetEgress); ok {
+		t.Fatal("expected no optimization target for INTERNET_EGRESS")
+	}
+}
