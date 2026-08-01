@@ -42,18 +42,26 @@ exiting.
 
 ## Running in a cluster (Helm)
 
-The chart's default image is published on GHCR
-(`ghcr.io/ananttyagi07/chidrixx-agent:latest`). Note: as of this writing
-that package is still private — pulling it from outside this account needs
-either the package set to public or an `imagePullSecrets` entry with a
-token that can read it. Once public, a plain install works against any
-cluster with no local build step:
+The chart is published as a real OCI artifact on GHCR — no need to clone
+this repo just to get the chart:
 
 ```bash
-helm install kharcha deploy/helm/kharcha -n kharcha --create-namespace
+helm install kharcha oci://ghcr.io/ananttyagi07/charts/kharcha \
+  --version 0.1.0 -n kharcha --create-namespace
 ```
 
-To iterate on a local change instead of pulling the published image:
+Its default image is also on GHCR (`ghcr.io/ananttyagi07/chidrixx-agent:latest`).
+**Note: as of this writing, all four GHCR packages this repo publishes
+(`chidrixx-agent`, `chidrixx-controlplane`, `charts/kharcha`,
+`charts/chidrixx-controlplane`) are still private** — GitHub doesn't expose
+package visibility through its API, only the web UI
+(`https://github.com/users/Ananttyagi07/packages/container/package/<name>`
+→ Package settings → Change visibility), so this is a manual step still
+pending. Until then, installing from outside this account needs either
+those packages set public or an `imagePullSecrets`/`helm registry login`
+credential that can read them.
+
+To iterate on a local change instead of pulling the published chart/image:
 
 ```bash
 docker build -t chidrixx-agent:dev .
@@ -75,7 +83,8 @@ control plane at all. For a multi-cluster view, deploy
 agents at it:
 
 ```bash
-helm install chidrixx deploy/helm/controlplane -n chidrixx --create-namespace
+helm install chidrixx oci://ghcr.io/ananttyagi07/charts/chidrixx-controlplane \
+  --version 0.1.0 -n chidrixx --create-namespace
 
 # then, per agent:
 helm upgrade kharcha deploy/helm/kharcha -n kharcha \
@@ -135,7 +144,10 @@ containers — in its own private cgroup namespace, one level removed from
 the host's real init namespace. `cgroup_skb` attach fails with `operation
 not permitted` across that boundary no matter what the Pod's
 `securityContext` says, because capabilities are scoped to the namespace
-they were granted in.
+they were granted in. The agent recognizes this specific `EPERM` and wraps
+it with a message pointing back at this section
+([agent/cmd/kharcha/loader.go](agent/cmd/kharcha/loader.go)), rather than
+leaving it as a generic, hard-to-diagnose permissions error.
 
 Fix: make sure the nodes actually run with the host's cgroup namespace —
 either set `"default-cgroupns-mode": "host"` in `/etc/docker/daemon.json`

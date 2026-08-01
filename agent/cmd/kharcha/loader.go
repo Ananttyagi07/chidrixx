@@ -2,7 +2,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"syscall"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -71,6 +73,26 @@ func (l *Loader) attach(cgroupPath, progName string, attachType ebpf.AttachType)
 		Program: prog,
 	})
 	if err != nil {
+		// EPERM here is the specific, recurring symptom of a cgroup
+		// namespace boundary (Docker's default cgroupns=private on
+		// cgroup v2 hosts, 20.10+): the capability check for attaching
+		// cgroup_skb programs is scoped to the namespace it was granted
+		// in, so a privileged Pod still gets "operation not permitted"
+		// if its node container is itself one level removed from the
+		// host's real cgroup namespace. This hits Docker-in-Docker style
+		// local clusters (kind/k3d) on a cgroup v2 host; real managed
+		// Kubernetes nodes (EKS/GKE/AKS) don't have this problem. See
+		// the README's "Known limitation: cgroup namespaces" section for
+		// the fix (default-cgroupns-mode: host in the Docker daemon).
+		if errors.Is(err, syscall.EPERM) {
+			return fmt.Errorf(
+				"attach %s at %s: %w — this is the known cgroup-namespace limitation "+
+					"(privileged: true isn't enough on kind/k3d), not a generic permissions bug; "+
+					"see the README's \"Known limitation: cgroup namespaces\" section",
+				progName, cgroupPath, err,
+			)
+		}
+
 		return fmt.Errorf("attach %s at %s: %w", progName, cgroupPath, err)
 	}
 
