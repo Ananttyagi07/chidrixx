@@ -20,6 +20,7 @@ import { AutomationsPage } from "./components/AutomationsPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { TeamsPage } from "./components/TeamsPage";
 import { HistoryPage } from "./components/HistoryPage";
+import { CostGraphPage } from "./components/CostGraphPage";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { LandingPage } from "./components/LandingPage";
@@ -208,6 +209,10 @@ function Dashboard({ session, onLogout }: { session: Session; onLogout: () => vo
           ) : active === "history" ? (
             <motion.div key="history" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <HistoryPage />
+            </motion.div>
+          ) : active === "cost-graph" ? (
+            <motion.div key="cost-graph" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <CostGraphPage />
             </motion.div>
           ) : active in DATA_PAGES ? (
             <motion.div key={active} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
