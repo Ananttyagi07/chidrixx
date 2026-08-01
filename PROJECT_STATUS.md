@@ -1,6 +1,6 @@
 # chidrixx — Project Status
 
-_Last updated: 2026-08-01 (multi-cloud spend, cluster topology, carbon estimate)_
+_Last updated: 2026-08-01 (real multi-tenant RBAC, a second real price book, Holt's forecasting model)_
 
 This is the honest, complete picture: what's real and verified, what's
 explicitly not built (and why), and what's actually left to do. Every claim
@@ -83,11 +83,28 @@ Two components, two Go modules:
   each ingest is a full point-in-time snapshot; `LatestFindings` always
   serves each cluster's most-recent snapshot, tested against stale-snapshot
   leakage.
-- **Auth**: Basic Auth (deliberate — works for both an agent posting JSON
-  and a human in a browser), constant-time token comparison. The control
-  plane now **auto-generates and manages its own token** (`auth.generate:
-  true`), stable across Helm upgrades (verified: two consecutive upgrades
-  produced the identical token, not a fresh one).
+- **Auth: real multi-tenant login, not a single shared token.** Separate
+  tenants, separate users with bcrypt-hashed passwords, separate
+  server-tracked login sessions (cookie-based), separate per-tenant agent
+  ingest tokens (SHA-256 hashed). Every store query is scoped by
+  `tenant_id` — verified with a dedicated cross-tenant isolation test
+  (two tenants, a deliberately reused cluster ID and settings key,
+  checked against every read path) and live: provisioned two real tenants
+  via the `create-tenant` CLI, logged into both in separate browser
+  contexts, confirmed neither saw the other's clusters or cost. Roles
+  (`admin`/`viewer`) gate the one browser-side write action (setting the
+  budget) — enforced server-side (a viewer's direct POST gets a real 403,
+  not just a hidden button). An existing single-tenant install upgrades
+  cleanly: on first boot with zero tenants, the control plane bootstraps
+  tenant 1 + an admin account automatically (password auto-generated and
+  logged once, or set via `CHIDRIXX_ADMIN_PASSWORD`) — verified against
+  the actual k3d cluster's real pre-existing database (2 clusters, 571
+  findings), all data intact and reachable under tenant 1 afterward.
+  Provisioning additional tenants/users is an operator action (the
+  `create-tenant`/`create-user` CLI subcommands), not a public signup
+  form — chidrixx is still a self-hosted tool, and that's a deliberate
+  scope boundary (see §7's future-vision note on why this matters for the
+  planned SaaS integration).
 - **Dashboard** (`controlplane/web`) — a real React + Vite + Tailwind +
   Recharts + Framer Motion SPA, replacing the old server-rendered HTML
   entirely. Built assets are committed to git (like `bpf/flow_cgroup.o`) and
@@ -114,12 +131,17 @@ Two components, two Go modules:
       snapshots, flags growth ≥2x. No fabricated "285% spike" narrative,
       just the two real numbers and the ratio. Verified: ingested a real 10x
       cost jump, confirmed it was correctly flagged.
-    - **Trend Projection** — a real least-squares linear fit over recent
-      snapshots, extended forward, rendered as a dashed continuation of the
-      real solid line. Deliberately **not** called "Forecast (next 7 days)"
-      or framed as ML — chidrixx's data is cumulative snapshots, not a
-      calendar-day time series, so that framing would be a claim it can't
-      back.
+    - **Trend Projection** — originally a plain least-squares line, since
+      upgraded to Holt's linear (double exponential smoothing) trend
+      model: a real, named classical time-series method, with its
+      alpha/beta smoothing parameters chosen by grid search minimizing
+      real in-sample forecast error, plus a genuine 80% prediction
+      interval computed from the model's own residual variance (shown as
+      a widening shaded band). Still deliberately **not** called "Forecast
+      (next 7 days)" or framed as ML — chidrixx's data is cumulative
+      snapshots, not a calendar-day time series, so that framing would
+      still be a claim it can't back. Verified live with a real 6-point
+      growing-cost trend.
     - **Costs & Usage** page — the full cross-cluster findings list (not
       just flagged ones), with a real client-side search and cluster filter.
   - **Sidebar nav consistency fix**: Budgets/Anomalies/Forecasting/Savings
@@ -138,7 +160,13 @@ Two components, two Go modules:
     - **Spend by provider** — new `SpendByCloud()` query groups real spend
       by the same cloud/region data, rendered as a real donut. Verified
       live with a genuine two-cluster (aws/ap-south-1, gcp/asia-south1)
-      ingest: correctly split 71.1%/28.9%, not simulated.
+      ingest: correctly split 71.1%/28.9%, not simulated. A real second
+      price book now exists too (`pricebook/gcp.yaml`, cited GCP VPC
+      network pricing, wired into the kharcha chart as a real
+      `values-gcp.yaml` override) — every live agent today still runs the
+      AWS book, so this shows one 100% slice in production until a second
+      cloud is actually deployed, but the moment it is, the breakdown
+      becomes real without further work.
     - **The six remaining sidebar pages are all real too** (built earlier
       this session, this file just hadn't caught up):
       **Insights** (top destinations by cost, confidence breakdown, an
@@ -182,6 +210,16 @@ Two components, two Go modules:
    image references to GHCR (still private at the time) broke the *next*
    upgrade of the already-running local release. Fixed by pinning
    `image.repository`/`image.tag` explicitly until the packages go public.
+6. **Settings-table primary-key collision, caught before it shipped.**
+   Building multi-tenant isolation, the naive migration (`ALTER TABLE
+   settings ADD COLUMN tenant_id`) still left `key` alone as the table's
+   real PRIMARY KEY — two tenants both setting `budget_inr` would have
+   silently overwritten each other's value despite the new column
+   existing. Fixed by detecting the old single-column-PK schema and
+   rebuilding the table with a genuine `(tenant_id, key)` composite key,
+   preserving existing data under tenant 1. Caught by a dedicated
+   regression test (`TestOpenStoreMigratesSettingsTableWithoutTenantID`)
+   before this ever reached a real deployment.
 
 ---
 
@@ -202,12 +240,11 @@ Two components, two Go modules:
 These are honest placeholders — visually present where relevant, clearly
 labeled "Coming soon," never filled with invented numbers:
 
-- **A real forecasting/ML model** — only the honest linear-projection exists
-  (§3). A genuine demand forecast would need a real time-series model and
-  calendar-aligned data this agent doesn't collect.
-- **No multi-tenant accounts / RBAC** — one shared Basic Auth token, no
-  per-user identity. The sidebar's "Admin / shared token access" label
-  reflects this honestly rather than fabricating a named logged-in user.
+- **A genuine ML/time-series forecast beyond Holt's method** — §3's Holt
+  model is a real classical technique with fitted parameters and a
+  computed confidence interval, but it's still not a neural/ARIMA-grade
+  forecast, and it still can't be calendar-aligned (chidrixx's data is
+  cumulative snapshots, not fixed time windows).
 - **No automated release/versioning** — both charts are still `0.1.0`;
   there's no CI job that bumps versions or cuts releases automatically.
 
@@ -218,12 +255,11 @@ labeled "Coming soon," never filled with invented numbers:
 | # | Item | Who | Effort |
 |---|---|---|---|
 | 1 | Flip 4 GHCR packages to public (web UI, listed in §4) | **You** | 5 min |
-| 2 | A second real price book (GCP/Azure), if wanted | Both | Medium — the plumbing (cloud/region grouping end-to-end) is done; every live agent still runs the same AWS price book today, so "Spend by provider" correctly shows one 100% slice until a second cloud is actually configured |
-| 3 | A genuine forecasting model (if the linear projection isn't enough) | Both | Large — needs a real time-series approach and more historical data than currently retained |
-| 4 | Multi-tenant accounts / real RBAC | Both | Large — a genuine new subsystem, only worth it if this becomes a multi-customer product rather than a single-operator tool |
-| 5 | Frontend bundle size (886KB, no code-splitting) | Me | Small — `React.lazy`/dynamic imports per page |
-| 6 | Commit the ad-hoc Playwright verification scripts into a real CI-run E2E suite | Me | Medium — they exist as throwaway scripts today, proven useful, worth making permanent |
-| 7 | Business/GTM (pricing, personas, launch) | You | Deprioritized per your own direction — technical completeness came first |
+| 2 | An actual second cloud deployed with the new GCP price book, to make "Spend by provider" show a real split in production (not just in tests) | You | 5 min per agent — `helm install -f values.yaml -f values-gcp.yaml` |
+| 3 | A deeper forecasting model, if Holt's method isn't enough | Both | Large — genuine ARIMA/neural approach, needs more retained history and a real decision on calendar alignment |
+| 4 | Frontend bundle size (886KB, no code-splitting) | Me | Small — `React.lazy`/dynamic imports per page |
+| 5 | Commit the ad-hoc Playwright verification scripts into a real CI-run E2E suite | Me | Medium — they exist as throwaway scripts today, proven useful, worth making permanent |
+| 6 | Business/GTM (pricing, personas, launch) | You | Deprioritized per your own direction — technical completeness came first |
 
 ---
 
@@ -250,15 +286,16 @@ above.
   the intent is to surface it inside the control plane itself — e.g. an
   assistant panel that can answer cluster-specific questions using the
   real ingested findings as context, rather than a bolt-on chatbot with
-  no access to actual cluster state. This depends on the multi-tenant
-  work in punch-list item #4 landing first, since a shared model
-  reasoning over multiple customers' traffic needs real tenant isolation
-  before it can ship.
+  no access to actual cluster state. The real multi-tenant isolation this
+  depended on (§3) now exists — separate tenants, separate sessions,
+  every query scoped by tenant_id — so this is no longer blocked on a
+  missing subsystem, just on the model itself being ready.
 - **Why this order**: the fine-tuning work is happening in parallel with
-  the product work above, but the SaaS integration is deliberately
-  sequenced *after* real accounts/RBAC exist — piping a real customer's
-  live traffic data into a shared model without tenant isolation would be
-  a genuine data-boundary problem, not just a nice-to-have gap.
+  the product work above; the SaaS integration was deliberately sequenced
+  *after* real tenant isolation because piping a real customer's live
+  traffic data into a shared model without it would have been a genuine
+  data-boundary problem, not just a nice-to-have gap. That gate is now
+  cleared.
 
 ---
 
@@ -266,8 +303,10 @@ above.
 
 The agent's core claims (byte-accurate attribution, real topology
 classification, real fix generation) are measured, not asserted. The
-control plane and dashboard are a genuinely working multi-cluster product
-with real user-facing features, not a static mockup — every sidebar page
-now has real content behind it. The one action item that needs you
-directly is #1 above (five minutes); the rest (#2–#4) are genuine scope
-decisions, not oversights.
+control plane and dashboard are a genuinely working multi-tenant product
+with real user-facing features and real data isolation between
+customers, not a static mockup or a single-shared-secret toy. Two action
+items need you directly: #1 (five minutes, GHCR visibility) and #2 (five
+minutes per agent, if you want a real multi-cloud split in production
+right now rather than just in tests). #3 is a genuine scope decision, not
+an oversight.
