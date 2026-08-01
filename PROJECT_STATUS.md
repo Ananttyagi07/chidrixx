@@ -1,6 +1,6 @@
 # chidrixx — Project Status
 
-_Last updated: 2026-08-01 (real multi-tenant RBAC, a second real price book, Holt's forecasting model)_
+_Last updated: 2026-08-01 (root-cause correlation, optimization $, history, cost graph, predictive driver, team ownership)_
 
 This is the honest, complete picture: what's real and verified, what's
 explicitly not built (and why), and what's actually left to do. Every claim
@@ -193,6 +193,78 @@ Two components, two Go modules:
       same honesty pattern as the price book's own "list prices, not
       negotiated rates" disclaimer.
 
+### New this session: six items from an external roadmap review, built for real
+
+A friend reviewed this project and listed 17 gaps against a full FinOps/
+observability platform. Most of that list is genuinely a different,
+much larger product (SaaS signup, GitHub/Slack/Jira integrations, GPU/LLM
+cost tracking, cross-customer benchmarking — see §8 for the honest
+breakdown of what got deliberately deferred and why). Six were real,
+buildable extensions of what already exists, and got built:
+
+- **Root-cause correlation (K8s deploy events → cost anomalies).** The
+  agent now watches every real Deployment's `spec.replicas` (new RBAC:
+  `apps/deployments` get/list/watch) and diffs it against the last-seen
+  snapshot each refresh cycle (`agent/cmd/kharcha/deployevents.go`) — a
+  direct observation, not an inference. Replica-count changes ship to the
+  control plane alongside findings (best-effort: an agent whose RBAC
+  predates this just detects nothing, doesn't break the core refresh
+  loop). Anomaly detection now searches each flagged cluster's real
+  deploy events in a 30-minute window before a cost jump and surfaces the
+  most recent one as `LikelyCause` — labeled correlation, not proven
+  causation, in both the API field name and the UI copy. Verified live:
+  a real 18x cost jump correctly correlated with a real
+  `ReplicaCountChanged` event 5 minutes earlier.
+- **Real $ optimization recommendations.** `agent/cmd/kharcha/pricing.go`'s
+  new `optimizationTarget()` names the realistic cheaper path class each
+  existing fix hint already describes (CROSS_AZ → SAME_AZ, NAT_EGRESS →
+  PRIVATE_OFFCLUSTER, CROSS_REGION → CROSS_AZ, MANAGED_SERVICE → SAME_AZ)
+  and reprices the exact same bytes at that class — the same real bytes,
+  the same price book, just a different achievable class, not a
+  fabricated "eliminate this traffic" number. INTERNET_EGRESS
+  deliberately gets no target (its real fix is usage reduction, not
+  reclassification) and honestly shows "—" instead of a number. The
+  Overview "Potential savings" stat and a new column on the top-fixes
+  table both use this real figure now, not the old (fabricated) "sum of
+  every flagged finding's full cost."
+- **Historical trend-change view.** New `/api/v1/workload-growth`
+  endpoint and History sidebar page rank every workload with ≥2 real
+  snapshots by the real delta between its first and most recent
+  appearance, over whatever history is actually retained — deliberately
+  not framed as "last 6 months," since the real window might be an hour.
+  Each ranked entry is cross-checked against real deploy events in its
+  own namespace during that window, reusing the same correlation as
+  above.
+- **Real Kubernetes cost graph.** A node-link topology view
+  (`CostGraphPage.tsx`) built entirely from data already fetched — no new
+  backend endpoint. A small dependency-free force-relaxation layout
+  (`graphLayout.ts`, ~100 lines, not a new npm package) positions real
+  workload nodes; line thickness and node size both encode real cost
+  (never color alone). Clicking an edge shows its exact real
+  traffic/cost/savings. Deliberately has no "Latency" field — this agent
+  counts bytes via eBPF, it has no per-flow latency instrumentation, and
+  the page says so explicitly rather than fabricating a number.
+- **Predictive driver.** The Forecasting page's existing Holt projection
+  (unchanged) is now paired with a real "why" when it's trending up: the
+  workload with the single largest real cost increase from the History
+  feature above. If no one workload's growth stands out, it honestly
+  says so ("likely broad-based") instead of forcing an attribution.
+  Composes three already-built, independently-verified signals; no new
+  modeling.
+- **Team ownership.** Real admin-configured namespace→team mapping
+  (`team.go`, new Teams page) and a `spend_by_team` breakdown on
+  dashboard-summary. `extractNamespace()` uses an RFC-1123-label check to
+  tell a real `namespace/pod` source apart from the non-k8s-resolved
+  cgroup-path fallback (which also contains slashes but never looks like
+  a namespace) — anything unmapped or unresolved honestly folds into
+  "Unassigned," never a guessed owner.
+
+All six: tenant-scoped like everything else in this control plane, with
+dedicated regression tests (cross-tenant isolation, role gating where
+relevant, the actual math/correlation logic) and a live Playwright/curl
+verification pass before being called done — same discipline as
+everything else in this document.
+
 ### Real bugs found and fixed during this work (kept for the record)
 
 1. **Nil-slice → JSON `null` crash.** Go's zero-value slice marshals to
@@ -220,6 +292,19 @@ Two components, two Go modules:
    preserving existing data under tenant 1. Caught by a dedicated
    regression test (`TestOpenStoreMigratesSettingsTableWithoutTenantID`)
    before this ever reached a real deployment.
+7. **Lost ingest token after the multi-tenant migration — hit for real,
+   not caught by a test.** The live k3d agent's `CHIDRIXX_AUTH_TOKEN`
+   secret still held the *old* shared-token value from before real
+   multi-tenant auth shipped; the real per-tenant token generated at
+   bootstrap was only ever printed once to pod logs, which had scrolled
+   away by the time this was redeployed. The agent was silently failing
+   every ingest with 401 until this was caught (`kubectl logs` on the
+   agent showed `ship to control plane: control plane returned status
+   401`). There was no way to recover the lost token (stored SHA-256
+   hashed) or mint a new one for an existing tenant — fixed by adding
+   `CreateAPIToken` + the `controlplane create-token --tenant-id N` CLI
+   subcommand, then using it to issue a real replacement and confirming
+   ingest succeeded again.
 
 ---
 
@@ -299,14 +384,81 @@ above.
 
 ---
 
+## 8. Roadmap items explicitly deferred (not built, and why)
+
+The same external review listed 11 more gaps beyond the six built above.
+Each is individually a real, defensible idea — none were dismissed as
+wrong — but each is genuinely its own product or needs infrastructure/
+credentials/data that don't exist in this environment. Listed honestly
+rather than silently dropped:
+
+- **GitHub/commit correlation** ("which PR caused this traffic spike") —
+  needs a GitHub App/webhook integration this control plane has no
+  credentials for.
+- **Multi-cloud discovery** (auto-detect AWS/Azure/GCP/Oracle/DO
+  resources) — needs real cloud-provider API credentials per account;
+  the price-book mechanism (§3) already supports multiple clouds once
+  agents are actually deployed to them, but auto-*discovery* of resources
+  across providers is a much larger, separate integration surface.
+- **FinOps workflow** (chargeback, department billing, monthly reports,
+  cost allocation) — a real accounting/billing subsystem, not a
+  dashboard feature; budget tracking (§3) is the honest subset that
+  exists today.
+- **Third-party integrations** (Slack/Teams/PagerDuty/Jira/ServiceNow/
+  Datadog/Grafana) — the alerting webhook (`agent/cmd/kharcha/alert.go`)
+  already posts to any Slack-*compatible* webhook URL, which is the real
+  building block; wiring specific vendor OAuth apps needs credentials and
+  API access this environment doesn't have.
+- **Self-service SaaS signup** — deliberately not built; provisioning is
+  the `create-tenant`/`create-user` CLI (§3), an operator action. A
+  public signup+billing flow is a genuine multi-week product decision
+  (verification, abuse prevention, payment processing), not a gap to
+  close incidentally.
+- **Business KPIs** (cost per API call / per customer / per model
+  request) — needs request-level attribution this agent doesn't have
+  (it prices network bytes, not application-level request counts);
+  would need a new instrumentation layer, not just a new dashboard card.
+- **AI infrastructure cost tracking** (GPU, embedding, inference cost per
+  prompt) — needs entirely new data sources (GPU metrics, model-serving
+  telemetry) this eBPF network agent was never built to observe. A real,
+  compelling idea for a *different* agent, not a small addition to this
+  one.
+- **Interactive cost graph latency** — the real cost graph (above) omits
+  latency on purpose; adding it for real would need new eBPF
+  instrumentation (RTT/socket timing), a materially larger scope than
+  the byte-counting this agent does today.
+- **Predictive optimization beyond the current driver attribution** — a
+  genuine calendar-aware forecast needs the ARIMA/neural work already
+  listed in §5/§6, not a quick addition.
+- **Cross-customer benchmarking** ("are you normal for your size?") —
+  needs an anonymized dataset aggregated across many real customers,
+  which doesn't exist with a single-operator deployment; a real feature
+  for a multi-tenant SaaS *after* it has actual paying customers, not
+  before.
+- **Security/exfiltration detection** (unexpected DNS, unknown-IP
+  alerts) — technically buildable from the same eBPF flow data this
+  agent already collects, but it's a different product category
+  (network security monitoring) from cost attribution, and starting it
+  without an explicit decision to expand scope risks scope creep into a
+  feature nobody asked to prioritize.
+
+---
+
 ## Bottom line
 
 The agent's core claims (byte-accurate attribution, real topology
 classification, real fix generation) are measured, not asserted. The
 control plane and dashboard are a genuinely working multi-tenant product
 with real user-facing features and real data isolation between
-customers, not a static mockup or a single-shared-secret toy. Two action
-items need you directly: #1 (five minutes, GHCR visibility) and #2 (five
-minutes per agent, if you want a real multi-cloud split in production
-right now rather than just in tests). #3 is a genuine scope decision, not
-an oversight.
+customers, not a static mockup or a single-shared-secret toy. Beyond the
+original feature set, it now does real root-cause correlation (deploy
+events → cost anomalies), real $ optimization recommendations, a real
+historical trend-change view, a real cost topology graph, and a real
+predictive driver — six genuine extensions built and verified this
+session, out of the 17 an external review suggested, with the other 11
+honestly documented in §8 as separate products or blocked on
+infrastructure this environment doesn't have, not silently dropped. Two
+action items need you directly: #1 (five minutes, GHCR visibility) and #2
+(five minutes per agent, if you want a real multi-cloud split in
+production right now rather than just in tests). #3 is a genuine scope
+decision, not an oversight.
