@@ -12,6 +12,7 @@ import { BudgetCard } from "./components/BudgetCard";
 import { AnomalyCard } from "./components/AnomalyCard";
 import { TrendProjectionCard } from "./components/TrendProjectionCard";
 import { CostsUsagePage } from "./components/CostsUsagePage";
+import { AnomaliesPage, BudgetsPage, ForecastingPage, SavingsAdvisorPage } from "./components/FeaturePages";
 import { Sidebar, NAV_ITEMS } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { LandingPage } from "./components/LandingPage";
@@ -164,6 +165,19 @@ function Dashboard() {
           {active === "costs" ? (
             <motion.div key="costs" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <CostsUsagePage />
+            </motion.div>
+          ) : active === "budgets" || active === "anomalies" || active === "forecasting" || active === "savings" ? (
+            <motion.div key={active} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              {!data && !error && <Skeleton />}
+              {error && (
+                <div className="rounded-xl border border-[var(--status-critical)]/40 bg-[var(--status-critical)]/10 px-4 py-3 text-sm text-[var(--status-critical)]">
+                  Couldn't load dashboard data: {error}
+                </div>
+              )}
+              {data && active === "budgets" && <BudgetsPage data={data} />}
+              {data && active === "anomalies" && <AnomaliesPage data={data} />}
+              {data && active === "forecasting" && <ForecastingPage data={data} />}
+              {data && active === "savings" && <SavingsAdvisorPage data={data} />}
             </motion.div>
           ) : active !== "overview" ? (
             <motion.div key="soon" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
