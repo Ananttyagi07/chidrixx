@@ -69,6 +69,7 @@ func main() {
 	api.HandleFunc("/api/v1/dashboard-summary", requireSession(store, supabaseAuth, handleDashboardSummary(store)))
 	api.HandleFunc("/api/v1/budget", requireSession(store, supabaseAuth, budgetRoute(store)))
 	api.HandleFunc("/api/v1/teams", requireSession(store, supabaseAuth, teamsRoute(store)))
+	api.HandleFunc("/api/v1/invites", requireSession(store, supabaseAuth, requireAdmin(handleInvites(store))))
 	api.HandleFunc("/api/v1/workload-growth", requireSession(store, supabaseAuth, handleWorkloadGrowth(store)))
 	api.HandleFunc("/api/v1/auth/me", requireSession(store, supabaseAuth, handleMe))
 

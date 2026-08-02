@@ -90,6 +90,12 @@ export interface TeamOwnership {
   team: string;
 }
 
+export interface Invite {
+  email: string;
+  role: "admin" | "viewer";
+  created_at: string;
+}
+
 export interface WorkloadCostPoint {
   reported_at: string;
   cost_high: number;

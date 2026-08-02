@@ -108,6 +108,14 @@ CREATE TABLE IF NOT EXISTS deploy_event (
 	occurred_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_deploy_event_tenant_cluster_time ON deploy_event(tenant_id, cluster_id, occurred_at);
+
+CREATE TABLE IF NOT EXISTS invites (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	tenant_id  INTEGER NOT NULL REFERENCES tenants(id),
+	email      TEXT NOT NULL UNIQUE,
+	role       TEXT NOT NULL,
+	created_at INTEGER NOT NULL
+);
 `
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()

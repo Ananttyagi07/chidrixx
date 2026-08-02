@@ -106,9 +106,10 @@ func requireSession(store *Store, supabaseAuth *SupabaseAuthenticator, next http
 // handleSupabaseBearer verifies a real Supabase access token, resolves it
 // to this control plane's own tenant/role model, auto-provisioning a
 // brand-new tenant the very first time a given Supabase identity is ever
-// seen (see ProvisionTenantForSupabaseUser in tenant.go) -- every request
-// after that resolves through the fast GetUserBySupabaseID lookup
-// instead.
+// seen -- unless a pending invite exists for their real email, in which
+// case they join the inviting tenant with the invited role instead (see
+// ResolveOrProvisionSupabaseUser in invite.go). Every request after
+// either path resolves through the fast GetUserBySupabaseID lookup.
 func handleSupabaseBearer(store *Store, supabaseAuth *SupabaseAuthenticator, token string, w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 	supaUser, err := supabaseAuth.VerifyToken(token)
 	if err != nil {
@@ -118,7 +119,7 @@ func handleSupabaseBearer(store *Store, supabaseAuth *SupabaseAuthenticator, tok
 
 	user, err := store.GetUserBySupabaseID(supaUser.ID)
 	if err == sql.ErrNoRows {
-		user, _, err = store.ProvisionTenantForSupabaseUser(supaUser.ID, supaUser.Email)
+		user, err = store.ResolveOrProvisionSupabaseUser(supaUser.ID, supaUser.Email)
 	}
 	if err != nil {
 		log.Printf("resolve supabase user %s: %v", supaUser.ID, err)
