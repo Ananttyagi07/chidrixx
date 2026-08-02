@@ -1,8 +1,64 @@
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { cardMotion } from "../motion";
 import { formatINR } from "../format";
 import { IconTrendingUp } from "../icons";
 import type { AnomalyPoint } from "../types";
+import { apiFetch } from "../apiFetch";
+
+type NarrateState = "idle" | "loading" | "done" | "unavailable" | "error";
+
+// Real, on-demand narration -- not run automatically for every anomaly
+// on every dashboard load (that would mean an LLM call per anomaly per
+// page view). One click, one real completion, grounded in the exact
+// numbers already shown above it (see controlplane/anomaly_narrator.go).
+function ExplainAnomaly({ clusterId }: { clusterId: string }) {
+  const [state, setState] = useState<NarrateState>("idle");
+  const [narrative, setNarrative] = useState("");
+
+  async function explain() {
+    setState("loading");
+    try {
+      const res = await apiFetch("/api/v1/anomalies/narrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cluster_id: clusterId }),
+      });
+      if (res.status === 503) {
+        setState("unavailable");
+        return;
+      }
+      if (!res.ok) {
+        setState("error");
+        return;
+      }
+      const data: { narrative: string } = await res.json();
+      setNarrative(data.narrative);
+      setState("done");
+    } catch {
+      setState("error");
+    }
+  }
+
+  if (state === "done") {
+    return <div className="mt-2 text-[0.7rem] text-[var(--ink-secondary)]">{narrative}</div>;
+  }
+  if (state === "unavailable") {
+    return <div className="mt-2 text-[0.68rem] text-[var(--ink-muted)]">Assistant not configured.</div>;
+  }
+  if (state === "error") {
+    return <div className="mt-2 text-[0.68rem] text-[var(--status-critical)]">Couldn't explain this, try again.</div>;
+  }
+  return (
+    <button
+      onClick={explain}
+      disabled={state === "loading"}
+      className="mt-2 text-[0.68rem] text-[var(--accent)] hover:underline disabled:opacity-50"
+    >
+      {state === "loading" ? "Explaining…" : "Explain this"}
+    </button>
+  );
+}
 
 // A real cross-snapshot cost comparison per cluster (controlplane/anomaly.go)
 // — no invented "spike vs usual" narrative, just the two real numbers and
@@ -57,6 +113,7 @@ export function AnomalyCard({ anomalies }: { anomalies: AnomalyPoint[] }) {
                   not proven causation.
                 </div>
               )}
+              <ExplainAnomaly clusterId={a.cluster_id} />
             </div>
           ))}
         </div>

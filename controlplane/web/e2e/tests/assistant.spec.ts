@@ -27,3 +27,13 @@ test("a direct POST to /api/v1/chat returns a real 503 when unconfigured", async
   const res = await page.request.post("/api/v1/chat", { data: { message: "hi" } });
   expect(res.status()).toBe(503);
 });
+
+// The anomaly narrator (controlplane/anomaly_narrator.go) shares the same
+// GROQ_API_KEY gate as the chat assistant. globalSetup only ingests one
+// snapshot, so there's no real anomaly (needs two) to click "Explain
+// this" on through the UI -- covered directly at the API layer instead,
+// same honest-503 contract.
+test("a direct POST to /api/v1/anomalies/narrate returns a real 503 when unconfigured", async ({ page }) => {
+  const res = await page.request.post("/api/v1/anomalies/narrate", { data: { cluster_id: "e2e-cluster" } });
+  expect(res.status()).toBe(503);
+});
