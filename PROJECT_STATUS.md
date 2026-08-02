@@ -1,6 +1,6 @@
 # chidrixx — Project & Technical Status (Universal Reference)
 
-_Last updated: 2026-08-02 (real Supabase auth, self-service team invites, a committed Playwright E2E suite, CI coverage for controlplane/, GHCR packages made public, and frontend code-splitting)_
+_Last updated: 2026-08-02 (real Supabase auth, self-service team invites, a committed Playwright E2E suite, CI coverage for controlplane/, GHCR packages made public, frontend code-splitting, closed-loop recommendation outcome tracking, and a real Groq-backed grounded chat assistant)_
 
 This is the single, complete picture of chidrixx: what's real and
 verified, what's explicitly not built (and why), what's actually left to
@@ -9,11 +9,13 @@ underneath every claim: which file, which function, which DB column,
 which test, which command proved it. Nothing here is recalled from
 memory; every number was measured against the actual repository at the
 commit this file was last updated against (`git log -1` at write time:
-`6c7750c`, "controlplane/web: code-split sidebar pages — closes
-punch-list item #4"), by running `go build`, `go test`, `gofmt -l`,
+`363ea2d`, "controlplane: real grounded chat assistant (Groq-backed,
+tool-calling)"), by running `go build`, `go test`, `gofmt -l`,
 `find`/`wc`/`grep`, `docker build`, `helm lint`/`template`, and live
-Playwright/curl passes against both a real k3d cluster and a real
-running `controlplane` server — not written and assumed to work.
+Playwright/curl passes — plus, for the two AI features, a live manual
+pass against the real Groq API and a real browser — against both a real
+k3d cluster and a real running `controlplane` server, not written and
+assumed to work.
 
 ---
 
@@ -209,7 +211,7 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
   `bpf/flow_cgroup.o`) and `go:embed`'d — `go build`/`go test` need no
   Node install. 15 sidebar pages total (full list in §4).
 
-### 3.2 API routes — 9 real endpoints + the static SPA shell route, exact
+### 3.2 API routes — 13 real endpoints + the static SPA shell route, exact
 
 | Route | Method(s) | Auth | Handler |
 |---|---|---|---|
@@ -220,12 +222,15 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
 | `/api/v1/teams` | GET / POST / DELETE | `requireSession` (POST+DELETE also `requireAdmin`) | `teamsRoute` |
 | `/api/v1/invites` | GET / POST / DELETE | `requireSession` + `requireAdmin` (all methods, including GET) | `handleInvites` |
 | `/api/v1/workload-growth` | GET | `requireSession` | `handleWorkloadGrowth` |
+| `/api/v1/outcomes` **(new)** | GET | `requireSession` | `handleOutcomes` |
+| `/api/v1/outcomes/apply` **(new)** | POST | `requireSession` | `handleMarkOutcomeApplied` |
+| `/api/v1/chat` **(new)** | POST | `requireSession` | `handleChat` (503 if `GROQ_API_KEY` unset) |
 | `/api/v1/auth/me` | GET | `requireSession` | `handleMe` |
 | `/api/v1/auth/login` | POST | none (that's the point) | `handleLogin` |
 | `/api/v1/auth/logout` | POST | none | `handleLogout` |
 | `/` | GET | none (static SPA shell, no secrets embedded) | `webAssetsHandler` |
 
-### 3.3 SQLite schema — 8 tables, exact DDL shape
+### 3.3 SQLite schema — 9 tables, exact DDL shape
 
 | Table | Key columns | Notes |
 |---|---|---|
@@ -237,7 +242,8 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
 | `sessions` | `id` PK (opaque random, doubles as cookie value), `user_id` FK, `tenant_id` FK, `created_at`, `expires_at` | Server-tracked — `DELETE`-revocable, unlike a stateless JWT. |
 | `team_ownership` | `(tenant_id, namespace)` composite PK, `team`, `created_at` | |
 | `deploy_event` | `id` PK, `tenant_id`, `cluster_id`, `namespace`, `name`, `reason`, `message`, `occurred_at` | Index on `(tenant_id, cluster_id, occurred_at)`. |
-| `invites` **(new)** | `id` PK, `tenant_id` FK, `email` UNIQUE, `role`, `created_at` | Upserted by email (`ON CONFLICT(email) DO UPDATE`); deleted atomically on acceptance (`AcceptInvite`). |
+| `invites` | `id` PK, `tenant_id` FK, `email` UNIQUE, `role`, `created_at` | Upserted by email (`ON CONFLICT(email) DO UPDATE`); deleted atomically on acceptance (`AcceptInvite`). |
+| `recommendation_outcomes` **(new)** | `id` PK, `tenant_id`, `cluster_id`, `source`, `destination`, `path_class` (unique together), `fix_hint`, `predicted_savings_low/high_inr`, `cost_before_inr`, `first_shown_at`, `last_shown_at`, `applied_at`, `cost_after_inr`, `measured_at` | See §3.11. `cost_before_inr`/predicted savings freeze once `applied_at` is set. |
 
 `users` also gained a `supabase_user_id TEXT` column **(new)**, nullable
 (empty for CLI-provisioned accounts, which keep using
@@ -251,7 +257,7 @@ column name" errors swallowed) except the `settings` table rebuild,
 which detects the old schema via `sqlite_master.sql` and does a real
 `CREATE new → INSERT SELECT → DROP → RENAME` inside one transaction.
 
-### 3.4 Control plane file-by-file (16 files)
+### 3.4 Control plane file-by-file (24 files)
 
 | File | Role |
 |---|---|
@@ -271,15 +277,25 @@ which detects the old schema via `sqlite_master.sql` and does a real
 | `workloadgrowth.go` | `WorkloadCostGrowth(tenantID, topN)` — ranks workloads by real first→last-snapshot delta across full retained history; correlates each with `RecentDeployEvents` in its own namespace over its own trend window. |
 | `workloadgrowth_api.go` | `handleWorkloadGrowth` — its own route, not folded into dashboard-summary (scans full history, not just latest-per-cluster). |
 | `webassets.go` | `go:embed`'s `web/dist`, serves the SPA + static assets, no auth. |
+| `supabase_auth.go` | `SupabaseAuthenticator.VerifyToken` — real `GET /auth/v1/user` call, not local JWKS verification. |
+| `invite.go` | `Invite` CRUD, `AcceptInvite`, `ResolveOrProvisionSupabaseUser` — invite-before-new-tenant precedence. |
+| `invite_api.go` | `handleInvites` — GET/POST/DELETE, all admin-only including GET. |
+| `outcome.go` **(new)** | `RecommendationOutcome`, `RecordRecommendationsShown` (upsert, freezes on applied), `MarkRecommendationApplied`, `measurePendingOutcomes` (the real before/after measurement), `ListRecommendationOutcomes`. |
+| `outcome_api.go` **(new)** | `handleOutcomes` (GET), `handleMarkOutcomeApplied` (POST). |
+| `groq.go` **(new)** | `GroqClient` — OpenAI-compatible chat-completions HTTP client, no SDK dependency. |
+| `chat_tools.go` **(new)** | `buildChatTools` — the 5 real tenant-scoped tools; `parseLenientInt` (works around a real Groq/Llama schema-validation quirk, see §3.12). |
+| `chat_api.go` **(new)** | `handleChat`, `runChatLoop` (the tool-calling loop, bounded retry). |
 
 ### 3.5 Control plane dependencies (`go.mod`, exact versions)
 
 Direct: `golang.org/x/crypto v0.54.0` (bcrypt), `modernc.org/sqlite
 v1.54.0` (pure-Go, no cgo). 8 indirect deps, all `modernc.org/sqlite`'s
 own transitive requirements (libc, mathutil, memory, bigfft, etc.) plus
-`google/uuid` and `go-isatty`.
+`google/uuid` and `go-isatty`. The Groq client (§3.12) adds zero new
+dependencies — it's a plain `net/http` client against Groq's
+OpenAI-compatible REST API, not an SDK.
 
-### 3.6 Control plane test inventory — 58 test functions across 10 files
+### 3.6 Control plane test inventory — 106 test functions across 17 files
 
 | File | Approx. tests | Covers |
 |---|---|---|
@@ -292,9 +308,13 @@ own transitive requirements (libc, mathutil, memory, bigfft, etc.) plus
 | `budget_api_test.go` | 7 | GET/POST, negative rejection, wrong-method, missing-tenant-context, admin-only POST |
 | `api_test.go` | 4 | Ingest+findings round trip, missing cluster_id, wrong method, missing tenant context |
 | `summary_api_test.go` | 2 | Full dashboard-summary shape (now asserts `SpendByTeam`), nil-slice→`[]` guard |
+| `supabase_auth_test.go` | 5 | Token verification against a fake Supabase server, bearer-vs-cookie fallback, provision-exactly-once |
+| `invite_test.go` + `invite_api_test.go` | 14 | Upsert-replace semantics, role validation, revoke, join-via-invite, tenant isolation, admin-only-including-GET |
+| `outcome_test.go` + `outcome_api_test.go` | 14 | Shown/freeze-on-applied upsert, idempotent apply, real cost-after measurement (both "fixed" and "flow gone" cases), tenant isolation |
+| `chat_test.go` | 12 | Groq client against a fake server, the tool-calling loop (success/unknown-tool/max-rounds/retry), tenant-scoped tool isolation, `parseLenientInt`, the full HTTP handler |
 
-Run: `cd controlplane && go test ./...` — **all 58 passing** (re-verified
-2026-08-02), ~13–28s wall time depending on cache (several tests use
+Run: `cd controlplane && go test ./...` — **all 106 passing** (re-verified
+2026-08-02), ~13–34s wall time depending on cache (several tests use
 real 1.1s sleeps to get distinct `reported_at` second-granularity
 timestamps).
 
@@ -477,22 +497,92 @@ the way (the logout regression in §3.9). Run: `cd controlplane/web &&
 npm run test:e2e` (needs Node ≥20; system Node in this dev environment
 is 18, worked around with a portable Node 20 install).
 
+### 3.11 Closed-loop recommendation outcome tracking (`outcome.go`/`outcome_api.go`)
+
+The foundational data layer the AI roadmap needs before any model gets
+trained or prompted against real outcomes — not an AI feature itself,
+deliberately built first. New `recommendation_outcomes` table
+(`(tenant_id, cluster_id, source, destination, path_class)` unique):
+every real fix recommendation the dashboard surfaces is auto-logged on
+each `dashboard-summary` load (best-effort, like deploy-event ingestion),
+capturing the real predicted savings and real pre-fix cost. An operator
+can mark one applied via a real "Mark as applied" button on the top-fixes
+table (`POST /api/v1/outcomes/apply`) — once applied, the baseline
+(`cost_before_inr`) freezes even if the same finding keeps showing up
+with a different cost on later loads. Once a fresher snapshot exists for
+that cluster, `measurePendingOutcomes` automatically records the real
+observed post-fix cost for the same source→destination pair (any
+path_class, since a working fix often changes the class rather than
+keeping it) — `0` if the flow disappeared from the latest snapshot
+entirely (a genuine success, not missing data), the observed cost
+otherwise. `GET /api/v1/outcomes` (any role) returns the full history.
+13 tests: upsert/freeze-on-applied semantics, idempotent apply,
+`ErrOutcomeNotFound` vs. already-applied, real cost-after measurement
+(both the "fixed" and "flow gone" cases), staying honestly unmeasured
+with no fresher data, tenant isolation. Verified live via the E2E suite
+(a real browser click round-trips through the real API).
+
+### 3.12 Real grounded chat assistant (`groq.go`/`chat_tools.go`/`chat_api.go`)
+
+A tenant-scoped chat assistant (`POST /api/v1/chat`, new Assistant
+sidebar page) that answers cost questions by having an LLM call real
+tools bound to this tenant's actual data — never inventing a number.
+Backed by Groq's OpenAI-compatible chat-completions API (Llama 3.3 70B
+by default, `GROQ_MODEL` env override), not a self-hosted model: this
+dev environment has no GPU, and reliable tool-calling needs one to run
+at usable chat speed — a small CPU-only model would be both too slow and
+too unreliable at tool-calling. Opt-in via `GROQ_API_KEY`, same additive
+pattern as Supabase auth's `SUPABASE_URL` (unset = a real, honest 503,
+not a crash or a silent fake reply).
+
+Five real tools, each wrapping an already-tested store method,
+tenant-scoped by Go closure (not by trusting the model's output):
+`get_top_fixes`, `get_anomalies`, `get_workload_growth`,
+`get_spend_by_team`, `get_recommendation_outcomes` (§3.11's data). The
+tool-calling loop (`runChatLoop`) caps at 5 rounds and gives an honest
+"couldn't finish" reply rather than looping forever.
+
+**A real bug caught during live verification against the actual Groq
+API**: Groq's server-side JSON-schema validation rejects a tool call
+outright when the model stringifies an integer argument — a
+reproducible Llama-on-Groq quirk, not a transient error (confirmed by
+retrying and getting the identical failure every time). Fixed by
+declaring the two numeric tool parameters (`limit`, `top_n`) as
+string-typed in the schema and parsing leniently on the Go side
+(`parseLenientInt`, handles both a JSON string and a real JSON number),
+plus a separate bounded one-shot retry in the loop for genuinely
+transient failures (a different, real failure class, tested with a
+fake server that fails once then succeeds).
+
+Verified: 24 new Go tests (a `fakeGroq` `httptest.Server` mirroring the
+real API contract, same pattern as `fakeSupabase`) covering the client,
+the tool-calling loop, tenant isolation of tool calls, and the API
+layer; a live manual pass against the real Groq API with real ingested
+data and a real browser (screenshot captured) — confirmed grounded
+answers quoting real ₹ figures, an honest "no anomalies detected" when
+there genuinely were none (not a fabricated one), and a correct refusal
+of an off-topic question. The committed E2E suite adds a hermetic test
+proving the honest-503 path (no `GROQ_API_KEY` in CI, matching the
+Supabase-auth pattern of keeping real secrets out of the committed
+suite) — not a live Groq call in CI.
+
 ---
 
 ## 4. Frontend — component inventory
 
-32 `.tsx` files + 9 `.ts` files, 4,044 lines. React 18 + Vite 5 +
+34 `.tsx` files + 11 `.ts` files, 4,597 lines. React 18 + Vite 5 +
 TypeScript + Tailwind + Recharts + Framer Motion + GSAP. No component
 library — every visual element (donut chart, trend chart, cost graph,
 force layout) is hand-built, matching the project's stated preference
 for owning its own rendering rather than pulling in a chart/graph
-dependency.
+dependency. Every sidebar page beyond Overview is now its own code-split
+chunk via `React.lazy()`/`Suspense` (see §8's now-closed bundle-size item).
 
-### 4.1 Pages (sidebar-routed, 15 total, verified against `Sidebar.tsx`)
+### 4.1 Pages (sidebar-routed, 16 total, verified against `Sidebar.tsx`)
 
-Overview (default), Insights, Explorer, Workloads, **Cost Graph**,
-**Teams**, Costs & Usage, Budgets, Savings Advisor, Forecasting,
-Anomalies, **History**, Reports, Automations, Settings.
+Overview (default), **Assistant**, Insights, Explorer, Workloads, Cost
+Graph, Teams, Costs & Usage, Budgets, Savings Advisor, Forecasting,
+Anomalies, History, Reports, Automations, Settings.
 
 ### 4.2 New components this session
 
@@ -679,31 +769,34 @@ something in progress. Marking it clearly as vision, not a roadmap
 commitment with dates, so it doesn't get conflated with the punch list
 above.
 
-- **A domain-specialized LLM, fine-tuned on eBPF / deep networking /
-  kernel internals.** The plan is to fine-tune a model specifically on
-  eBPF program semantics, Linux networking internals (netfilter, tc,
-  cgroups, the network namespace/veth/CNI stack), and kernel-level
-  traffic behavior — not a general coding assistant repurposed for this
-  domain. Intended use once ready: interpreting a cluster's real flow
-  data and fix-engine output in natural language, reasoning about why a
-  given path was classified the way it was, and eventually helping
-  author or review the `NetworkPolicy` fixes chidrixx already generates
-  mechanically today — all grounded in the agent's own real, measured
-  data, not invented network theory.
-- **Later SaaS integration.** Once that model is trained and validated,
-  the intent is to surface it inside the control plane itself — e.g. an
-  assistant panel that can answer cluster-specific questions using the
-  real ingested findings as context, rather than a bolt-on chatbot with
-  no access to actual cluster state. The real multi-tenant isolation this
-  depended on (§3) now exists — separate tenants, separate sessions,
-  every query scoped by tenant_id — so this is no longer blocked on a
-  missing subsystem, just on the model itself being ready.
-- **Why this order**: the fine-tuning work is happening in parallel with
-  the product work above; the SaaS integration was deliberately sequenced
-  *after* real tenant isolation because piping a real customer's live
-  traffic data into a shared model without it would have been a genuine
-  data-boundary problem, not just a nice-to-have gap. That gate is now
-  cleared.
+- **Revised plan (superseding the original fine-tuning-first plan
+  below): the grounded chat assistant already shipped** (§3.12) — a
+  Groq-hosted off-the-shelf model (Llama 3.3 70B) doing real tool-calling
+  against real tenant-scoped data, not a custom fine-tuned model. This
+  was a deliberate strategic pivot made explicitly in conversation: a
+  small model fine-tuned on eBPF/networking *documentation* has nowhere
+  near the capacity to reason well and would still need real GPU
+  infrastructure this environment doesn't have; a frontier model doing
+  retrieval/tool-calling gets most of the value today, cheaply, with no
+  training step at all.
+- **What's actually worth fine-tuning later, and why it isn't yet**: not
+  a model trained on eBPF/networking knowledge, but a small model or
+  ranking/calibration model trained on *this product's own real outcome
+  data* — did a given recommendation get applied, did it actually save
+  the predicted amount — which is a genuinely proprietary dataset no
+  competitor can replicate (needs chidrixx's own byte-level telemetry).
+  §3.11's `recommendation_outcomes` table is that data layer, shipped
+  this session specifically to start capturing it. The honest gap: there
+  are zero real rows of "recommendation → real operator outcome" in it
+  yet from actual production usage — this needs real customers using the
+  product for a real period of time before there's anything to train on.
+  Revisit once that data actually exists.
+- **A deeper domain-specialized model remains a real, undated
+  possibility** if Groq's off-the-shelf model proves insufficient for
+  more advanced reasoning (e.g. multi-hop causal simulation over the
+  cost-topology graph in §3.7 — "what would happen to cost if I moved
+  this workload" — a materially harder task than the current tool-calling
+  Q&A). Not started, not scoped, genuinely future vision.
 
 ---
 
@@ -760,10 +853,13 @@ across component comments:
 - **cgroup-namespace limitation is real and undocumented-around** — kind/k3d
   Docker-in-Docker environments hit a genuine `EPERM`; real managed
   Kubernetes (EKS/GKE/AKS) doesn't.
-- **GHCR visibility is genuinely API-blocked** — verified by direct
-  testing, not assumed; see §8 item 1.
-- **`controlplane/` has zero CI coverage** — see §6; not hidden in a
-  footnote, called out as a concrete risk.
+- **A real second-cloud agent deployment is blocked on a real money
+  decision** (India's GCP billing deposit requirement), not a technical
+  gap — see §8 item 1. Deliberately not pushed through for a demo.
+- **The chat assistant has no proprietary outcome data to fine-tune on
+  yet** — §3.11's `recommendation_outcomes` table exists specifically to
+  start capturing it, but has zero real rows from actual production
+  usage today. See §9.
 
 ---
 
@@ -771,25 +867,28 @@ across component comments:
 
 The agent's core claims (byte-accurate attribution, real topology
 classification, real fix generation) are measured, not asserted. The
-control plane and dashboard are a genuinely working multi-tenant product
-with real user-facing features and real data isolation between
-customers, not a static mockup or a single-shared-secret toy. Beyond the
-original feature set, it now does real root-cause correlation (deploy
-events → cost anomalies), real $ optimization recommendations, a real
-historical trend-change view, a real cost topology graph, and a real
-predictive driver — six genuine extensions built and verified this
-session, out of the 17 an external review suggested, with the other 11
-honestly documented in §10 as separate products or blocked on
-infrastructure this environment doesn't have, not silently dropped.
+control plane and dashboard are a genuinely working multi-tenant SaaS-
+capable product: real Supabase-backed public signup alongside the
+original self-hosted CLI path, real self-service team invites, real
+root-cause correlation, real $ optimization recommendations, a real
+historical trend-change view, a real cost topology graph, a real
+predictive driver, real closed-loop recommendation-outcome tracking, and
+a real Groq-backed grounded chat assistant — not a static mockup or a
+single-shared-secret toy.
 
-The one concrete technical risk worth naming plainly: **`controlplane/`
-— the larger of the two modules, with more tests and more surface area
-than `agent/` — has no CI coverage at all** (§6). Everything in this
-document was verified by hand, correctly, but nothing stops a future
-change from silently breaking it.
+`controlplane/` now has the same CI coverage `agent/` always had (§6,
+seven jobs total: build/test/Docker/Helm for both modules plus a real
+E2E job) — the "no CI coverage" risk this section used to name is
+closed. GHCR image/chart visibility is done and independently verified
+with zero stored credentials. Frontend bundle code-splitting is done.
 
-Action items that need you directly: #1 (five minutes, GHCR visibility)
-and #2 (five minutes per agent, if you want a real multi-cloud split in
-production right now rather than just in tests). #3 and the CI gap (§8
-item 5) are genuine scope/engineering-investment decisions, not
-oversights.
+What's genuinely left, in priority order (§8): a real second-cloud agent
+deployment is blocked on a real, non-technical wall (India's GCP billing
+deposit requirement — a money decision, deliberately not pushed through
+for a demo); a deeper forecasting model is a real engineering-investment
+decision, not an oversight; GTM/business work is explicitly
+deprioritized per prior direction. The two AI features (outcome
+tracking, the chat assistant) are deliberately sequenced — the data
+layer first, then a model grounded against it — with the honest data
+gap named directly in §9's future-vision section: there's no proprietary
+outcome dataset yet, only the schema now capturing it going forward.
