@@ -90,6 +90,7 @@ func main() {
 	api.HandleFunc("/api/v1/outcomes/apply", requireSession(store, supabaseAuth, handleMarkOutcomeApplied(store)))
 	api.HandleFunc("/api/v1/chat", requireSession(store, supabaseAuth, handleChat(store, groq)))
 	api.HandleFunc("/api/v1/anomalies/narrate", requireSession(store, supabaseAuth, handleNarrateAnomaly(store, groq)))
+	api.HandleFunc("/api/v1/forecast", requireSession(store, supabaseAuth, handleForecast(store)))
 	api.HandleFunc("/api/v1/auth/me", requireSession(store, supabaseAuth, handleMe))
 
 	mux := http.NewServeMux()

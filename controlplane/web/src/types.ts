@@ -63,6 +63,30 @@ export interface ClusterSummaryView {
   trend: CostTrendPoint[];
 }
 
+export interface DeepForecastPoint {
+  h: number;
+  forecast: number;
+  lower: number;
+  upper: number;
+}
+
+export interface DeepForecastResult {
+  model: "holt" | "damped_holt";
+  alpha: number;
+  beta: number;
+  phi: number;
+  points_used: number;
+  backtest_folds: number;
+  backtest_mae_holt: number;
+  backtest_mae_damped: number;
+  forecast: DeepForecastPoint[];
+}
+
+export interface ForecastResponse {
+  available: boolean;
+  result?: DeepForecastResult;
+}
+
 export interface DeployEvent {
   namespace: string;
   name: string;

@@ -4,6 +4,7 @@ import { BudgetCard } from "./BudgetCard";
 import { AnomalyCard } from "./AnomalyCard";
 import { TrendProjectionCard } from "./TrendProjectionCard";
 import { PredictiveDriverCard } from "./PredictiveDriverCard";
+import { DeepForecastCard } from "./DeepForecastCard";
 import { TopFixesTable } from "./TopFixesTable";
 import { AnimatedNumber } from "./AnimatedNumber";
 import { formatINR } from "../format";
@@ -59,6 +60,7 @@ export function ForecastingPage({ data }: { data: DashboardSummary }) {
       <div className="flex max-w-2xl flex-col gap-3">
         <TrendProjectionCard points={data.trend} />
         <PredictiveDriverCard trend={data.trend} />
+        <DeepForecastCard clusters={data.clusters} />
       </div>
     </motion.div>
   );
