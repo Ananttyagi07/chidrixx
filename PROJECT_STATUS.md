@@ -1,6 +1,6 @@
 # chidrixx — Project & Technical Status (Universal Reference)
 
-_Last updated: 2026-08-02 (real Supabase auth, self-service team invites, a committed Playwright E2E suite, CI coverage for controlplane/, GHCR packages made public, frontend code-splitting, closed-loop recommendation outcome tracking, a real Groq-backed grounded chat assistant, and a real anomaly root-cause narrator)_
+_Last updated: 2026-08-02 (real Supabase auth, self-service team invites, a committed Playwright E2E suite, CI coverage for controlplane/, GHCR packages made public, frontend code-splitting, closed-loop recommendation outcome tracking, a real Groq-backed grounded chat assistant, a real anomaly root-cause narrator, and a real deeper forecasting model)_
 
 This is the single, complete picture of chidrixx: what's real and
 verified, what's explicitly not built (and why), what's actually left to
@@ -9,12 +9,14 @@ underneath every claim: which file, which function, which DB column,
 which test, which command proved it. Nothing here is recalled from
 memory; every number was measured against the actual repository at the
 commit this file was last updated against (`git log -1` at write time:
-`568727b`, "controlplane: real anomaly root-cause narrator
-(Groq-backed)"), by running `go build`, `go test`, `gofmt -l`,
+`4a2bd29`, "controlplane: real deeper forecasting model (backtested Holt
+vs damped Holt)"), by running `go build`, `go test`, `gofmt -l`,
 `find`/`wc`/`grep`, `docker build`, `helm lint`/`template`, and live
-Playwright/curl passes — plus, for the three AI features, a live manual
-pass against the real Groq API and a real browser — against both a real
-k3d cluster and a real running `controlplane` server, not written and
+Playwright/curl passes — plus, for the three AI features and the deeper
+forecasting model, a live manual pass against real production data (for
+the forecasting model, a pulled copy of the actual live database) — all
+against both a real k3d cluster and a real running `controlplane`
+server, not written and
 assumed to work.
 
 ---
@@ -211,7 +213,7 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
   `bpf/flow_cgroup.o`) and `go:embed`'d — `go build`/`go test` need no
   Node install. 15 sidebar pages total (full list in §4).
 
-### 3.2 API routes — 14 real endpoints + the static SPA shell route, exact
+### 3.2 API routes — 15 real endpoints + the static SPA shell route, exact
 
 | Route | Method(s) | Auth | Handler |
 |---|---|---|---|
@@ -225,7 +227,8 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
 | `/api/v1/outcomes` **(new)** | GET | `requireSession` | `handleOutcomes` |
 | `/api/v1/outcomes/apply` **(new)** | POST | `requireSession` | `handleMarkOutcomeApplied` |
 | `/api/v1/chat` | POST | `requireSession` | `handleChat` (503 if `GROQ_API_KEY` unset) |
-| `/api/v1/anomalies/narrate` **(new)** | POST | `requireSession` | `handleNarrateAnomaly` (503 if `GROQ_API_KEY` unset) |
+| `/api/v1/anomalies/narrate` | POST | `requireSession` | `handleNarrateAnomaly` (503 if `GROQ_API_KEY` unset) |
+| `/api/v1/forecast` **(new)** | GET | `requireSession` | `handleForecast` — `?cluster_id=X`, real backtested model selection (§3.14) |
 | `/api/v1/auth/me` | GET | `requireSession` | `handleMe` |
 | `/api/v1/auth/login` | POST | none (that's the point) | `handleLogin` |
 | `/api/v1/auth/logout` | POST | none | `handleLogout` |
@@ -258,7 +261,7 @@ column name" errors swallowed) except the `settings` table rebuild,
 which detects the old schema via `sqlite_master.sql` and does a real
 `CREATE new → INSERT SELECT → DROP → RENAME` inside one transaction.
 
-### 3.4 Control plane file-by-file (26 files)
+### 3.4 Control plane file-by-file (28 files)
 
 | File | Role |
 |---|---|
@@ -287,7 +290,9 @@ which detects the old schema via `sqlite_master.sql` and does a real
 | `chat_tools.go` **(new)** | `buildChatTools` — the 5 real tenant-scoped tools; `parseLenientInt` (works around a real Groq/Llama schema-validation quirk, see §3.12). |
 | `chat_api.go` | `handleChat`, `runChatLoop` (the tool-calling loop, bounded retry). |
 | `anomaly_narrator.go` **(new)** | `narrateAnomaly` — single-completion (no tool-calling) explanation of one real, already-computed `Anomaly`. |
-| `anomaly_narrator_api.go` **(new)** | `handleNarrateAnomaly` — `POST /api/v1/anomalies/narrate`, re-derives the anomaly fresh server-side. |
+| `anomaly_narrator_api.go` | `handleNarrateAnomaly` — `POST /api/v1/anomalies/narrate`, re-derives the anomaly fresh server-side. |
+| `forecast.go` **(new)** | `holtFit`/`holtForecastAhead` (damped-trend generalized Holt), `fitBestHolt`, `backtestMAE` (rolling-origin validation), `ComputeDeepForecast` (the model-selection entry point). |
+| `forecast_api.go` **(new)** | `handleForecast` — `GET /api/v1/forecast?cluster_id=X`. |
 
 ### 3.5 Control plane dependencies (`go.mod`, exact versions)
 
@@ -298,7 +303,7 @@ own transitive requirements (libc, mathutil, memory, bigfft, etc.) plus
 dependencies — it's a plain `net/http` client against Groq's
 OpenAI-compatible REST API, not an SDK.
 
-### 3.6 Control plane test inventory — 112 test functions across 18 files
+### 3.6 Control plane test inventory — 122 test functions across 19 files
 
 | File | Approx. tests | Covers |
 |---|---|---|
@@ -316,8 +321,9 @@ OpenAI-compatible REST API, not an SDK.
 | `outcome_test.go` + `outcome_api_test.go` | 14 | Shown/freeze-on-applied upsert, idempotent apply, real cost-after measurement (both "fixed" and "flow gone" cases), tenant isolation |
 | `chat_test.go` | 12 | Groq client against a fake server, the tool-calling loop (success/unknown-tool/max-rounds/retry), tenant-scoped tool isolation, `parseLenientInt`, the full HTTP handler |
 | `anomaly_narrator_test.go` | 6 | Prompt grounding (with/without a real likely cause), 503/404/tenant-isolation at the API layer |
+| `forecast_test.go` | 10 | Synthetic linear series picks plain Holt / synthetic plateauing series picks damped Holt (both asserted via real measured MAE), honest zero-fold fallback with too little history, damped-never-exceeds-undamped invariant, API layer (400/tenant-isolation/end-to-end) |
 
-Run: `cd controlplane && go test ./...` — **all 112 passing** (re-verified
+Run: `cd controlplane && go test ./...` — **all 122 passing** (re-verified
 2026-08-02), ~13–34s wall time depending on cache (several tests use
 real 1.1s sleeps to get distinct `reported_at` second-granularity
 timestamps).
@@ -599,6 +605,41 @@ assistant (direct API call — `globalSetup.ts` only ingests one snapshot,
 so there's no real 2-snapshot anomaly to click through in the committed
 suite).
 
+### 3.14 Real deeper forecasting model (`forecast.go`/`forecast_api.go`) — closes punch-list "deeper forecasting model"
+
+Scoped against what the real data actually supports, checked before
+building anything: a pulled copy of the real production database showed
+one cluster with 4,164 snapshots over ~1.8 days (~37s cadence), another
+with 5. Real volume, but nowhere near enough distinct calendar days for
+a seasonal component (Holt-Winters/Prophet) to be anything but invented
+pattern-matching on noise, and not enough/clean enough data to justify
+ARIMA or a neural sequence model. What the real data *does* support:
+genuine rolling-origin (walk-forward) backtesting comparing plain Holt
+(the existing client-side model, ported to Go) against damped-trend Holt
+(a real, well-established fix for Holt's known runaway-extrapolation
+weakness) — picking whichever actually measured lower error on that
+cluster's own held-out real history, server-side, against the cluster's
+full retained history (up to 5,000 points) rather than the 30-point cap
+the lightweight Overview trend card uses.
+
+`GET /api/v1/forecast?cluster_id=X` returns which model won, its
+backtested MAE for both candidates, how many real folds ran (0 if there
+wasn't enough history — an honest single-Holt fallback, not a forced
+comparison), and the forecast itself. New `DeepForecastCard.tsx` on the
+Forecasting page, per-cluster selector.
+
+**Verified two ways.** Synthetic: a genuinely unbounded linear series
+correctly picks plain Holt; a series that grows then plateaus correctly
+picks damped Holt — asserted via real measured MAE comparison in the
+test, not hand-waved. Live, against a pulled copy of the actual
+production database: on the real 4,164-point cluster, 20 real backtest
+folds initially picked damped Holt (MAE 0.0200 vs 0.0222); re-run
+minutes later with 39 more real snapshots the live agent had ingested in
+the meantime, it correctly flipped to plain Holt (0.015 vs 0.028) —
+proof this is a live-recomputed real decision, not a fixed choice. The
+sparse 5-point cluster correctly falls back to a single Holt fit with 0
+backtest folds, no false claim of a comparison having run.
+
 ---
 
 ## 4. Frontend — component inventory
@@ -781,16 +822,13 @@ labeled, never filled with invented numbers:
 | # | Item | Who | Effort | Technical detail |
 |---|---|---|---|---|
 | 1 | An actual second cloud deployed with the new GCP price book | You | Blocked | Plumbing is 100% real and tested (`pricebook/gcp.yaml`, `values-gcp.yaml`, `SpendByCloud()`, the donut) — verified by walking through the actual deploy steps live (Cloud Shell, `gcloud compute instances create`). Blocked on a real, non-technical wall: this GCP project has no billing account, and India requires a ~₹15,000 refundable deposit to activate one. Deliberately not pushed through — that's real money, not a 5-minute task, and it's not worth spending to prove plumbing that's already tested. Options if this gets revisited: pay the deposit, or retarget `values-gcp.yaml`'s pattern at a genuinely free-tier host (e.g. Oracle Cloud) with a new price book file. |
-| 2 | A deeper forecasting model, if Holt's isn't enough | Both | Large | Needs (a) enough retained history to fit a seasonal component meaningfully — data is agent-refresh-cadence snapshots, not calendar-aligned, so a real seasonal model needs a time-bucketing decision first; (b) a genuine choice between ARIMA/Prophet/a small neural sequence model, each with different data-volume requirements this system hasn't validated it has. |
-| 3 | Business/GTM (pricing, personas, launch) | You | Deprioritized | No pricing page, no persona docs, no launch plan — explicitly deprioritized per prior direction ("technical completeness came first"). |
+| 2 | Business/GTM (pricing, personas, launch) | You | Deprioritized | No pricing page, no persona docs, no launch plan — explicitly deprioritized per prior direction ("technical completeness came first"). |
 
 **Done since the last version of this table**:
 - Flipping the 4 GHCR packages to public (was item #1) — verified for real: fully logged-out `docker pull` of both container images, and anonymous GHCR-token `tags/list` calls against both OCI Helm charts, all succeeding with no credentials involved.
 - Frontend bundle code-splitting (was item #4) — `React.lazy()` + `Suspense` now wraps all 11 non-Overview sidebar pages (`controlplane/web/src/App.tsx`); each is its own chunk (11 new files in `dist/assets/`, ~1.5–8KB each, `FeaturePages`'s four exports dedupe into one shared chunk since Rollup collapses same-module dynamic imports). The main bundle is still large (~1.1MB) because that size is dominated by vendor libraries (React, Framer Motion, GSAP, Recharts, Supabase client), not app page code — vendor-chunk splitting would be the next lever if this needs to go further, not attempted here since it wasn't what was asked. Re-running the E2E suite after this change surfaced and fixed a real pre-existing test race in `dashboard.spec.ts` (asserted on page text before the async dashboard-summary fetch resolved) — noted here since it was found doing this work, not a new gap.
-
-**Done since the last version of this table**: CI coverage for
-`controlplane/` (was item #5) — see §6, seven jobs now, `controlplane/`
-has the same build/test/Docker/Helm/E2E coverage `agent/` always had.
+- CI coverage for `controlplane/` (was item #5) — see §6, seven jobs now, `controlplane/` has the same build/test/Docker/Helm/E2E coverage `agent/` always had.
+- **A deeper forecasting model** (was item #2/#3) — see §3.14. Scoped honestly against the real production data volume (checked first, not assumed): real rolling-origin backtesting comparing plain Holt against damped-trend Holt, server-side, against a cluster's full retained history — not Holt-Winters/ARIMA/a neural model, which the real data doesn't support yet without inventing pattern-matching on noise. Live-verified against a pulled copy of the actual production database, including watching the model selection genuinely flip as more real data arrived.
 
 ---
 
@@ -906,23 +944,28 @@ original self-hosted CLI path, real self-service team invites, real
 root-cause correlation, real $ optimization recommendations, a real
 historical trend-change view, a real cost topology graph, a real
 predictive driver, real closed-loop recommendation-outcome tracking, and
-a real Groq-backed grounded chat assistant, and a real anomaly
-root-cause narrator — not a static mockup or a single-shared-secret toy.
+a real Groq-backed grounded chat assistant, a real anomaly root-cause
+narrator, and a real deeper forecasting model — not a static mockup or a
+single-shared-secret toy.
 
 `controlplane/` now has the same CI coverage `agent/` always had (§6,
 seven jobs total: build/test/Docker/Helm for both modules plus a real
 E2E job) — the "no CI coverage" risk this section used to name is
 closed. GHCR image/chart visibility is done and independently verified
 with zero stored credentials. Frontend bundle code-splitting is done.
+The deeper forecasting model (§3.14) is genuinely scoped to what the
+real production data volume supports — checked first by pulling the
+actual live database, not assumed — real backtested model selection
+between plain and damped Holt, not an invented seasonal model the data
+can't honestly back yet.
 
 What's genuinely left, in priority order (§8): a real second-cloud agent
 deployment is blocked on a real, non-technical wall (India's GCP billing
 deposit requirement — a money decision, deliberately not pushed through
-for a demo); a deeper forecasting model is a real engineering-investment
-decision, not an oversight; GTM/business work is explicitly
-deprioritized per prior direction. The three AI features (outcome
-tracking, the chat assistant, the anomaly narrator) are deliberately
-sequenced — the data layer first, then a model grounded against it —
-with the honest data gap named directly in §9's future-vision section:
-there's no proprietary outcome dataset yet, only the schema now
-capturing it going forward.
+for a demo); GTM/business work is explicitly deprioritized per prior
+direction. The four AI/modeling features (outcome tracking, the chat
+assistant, the anomaly narrator, the deeper forecasting model) are
+deliberately sequenced — the data layer first, then models grounded
+against real data volume/history — with the honest data gap named
+directly in §9's future-vision section: there's no proprietary outcome
+dataset yet, only the schema now capturing it going forward.
