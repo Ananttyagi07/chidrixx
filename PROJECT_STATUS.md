@@ -1,6 +1,6 @@
 # chidrixx — Project & Technical Status (Universal Reference)
 
-_Last updated: 2026-08-02 (real Supabase auth, self-service team invites, a committed Playwright E2E suite, and CI coverage for controlplane/)_
+_Last updated: 2026-08-02 (real Supabase auth, self-service team invites, a committed Playwright E2E suite, CI coverage for controlplane/, GHCR packages made public, and frontend code-splitting)_
 
 This is the single, complete picture of chidrixx: what's real and
 verified, what's explicitly not built (and why), what's actually left to
@@ -9,11 +9,11 @@ underneath every claim: which file, which function, which DB column,
 which test, which command proved it. Nothing here is recalled from
 memory; every number was measured against the actual repository at the
 commit this file was last updated against (`git log -1` at write time:
-`0967fdc`, "ci: add CI coverage for controlplane/ — closes punch-list
-item #5"), by running `go build`, `go test`, `gofmt -l`, `find`/`wc`/
-`grep`, `docker build`, `helm lint`/`template`, and live Playwright/curl
-passes against both a real k3d cluster and a real running
-`controlplane` server — not written and assumed to work.
+`6c7750c`, "controlplane/web: code-split sidebar pages — closes
+punch-list item #4"), by running `go build`, `go test`, `gofmt -l`,
+`find`/`wc`/`grep`, `docker build`, `helm lint`/`template`, and live
+Playwright/curl passes against both a real k3d cluster and a real
+running `controlplane` server — not written and assumed to work.
 
 ---
 
@@ -548,7 +548,7 @@ hand-copied.
 |---|---|
 | Helm charts (`deploy/helm/kharcha`, `deploy/helm/controlplane`) | **Real.** Lint-clean, template-clean, and actually `helm install`/`upgrade`d against a live cluster (not just linted). |
 | OCI chart repo on GHCR | **Real.** `oci://ghcr.io/ananttyagi07/charts/{kharcha,chidrixx-controlplane}` — packaged, pushed, pulled back down, and `helm template`d from the round-tripped artifact to confirm it's not corrupted. |
-| GHCR image + chart visibility | **Blocked, needs your action.** All four packages (`chidrixx-agent`, `chidrixx-controlplane`, `charts/kharcha`, `charts/chidrixx-controlplane`) are still **private**. GitHub's REST API returns a 404 on the documented visibility-change endpoint even with a working `GET` on the same path and the right token scope — this is a web-UI-only setting, confirmed by direct testing, not a permissions issue on my end. Fix: `github.com/users/Ananttyagi07/packages/container/package/<name>` → Package settings → Change visibility → Public, for all four. |
+| GHCR image + chart visibility | **Done.** All four packages (`chidrixx-agent`, `chidrixx-controlplane`, `charts/kharcha`, `charts/chidrixx-controlplane`) are now **public**, flipped via the GitHub web UI (GitHub's REST API 404s on the documented visibility-change endpoint even with a working `GET` and the right token scope — web-UI-only, confirmed by direct testing). Re-verified with zero credentials involved: `docker logout ghcr.io` then a clean `docker pull` of both images succeeded; both OCI Helm charts' `tags/list` returned 200 using a freshly-minted anonymous GHCR bearer token. |
 | Ingress/TLS (control plane) | **Real, optional.** `ingress.enabled` in the Helm chart, verified: a real request through Traefik with the right `Host` header + Basic Auth returned 200. |
 | cgroup-namespace limitation | **Documented, not fixable from our side** (inherent to Docker-in-Docker clusters like kind/k3d). The agent now gives a specific, actionable error instead of a generic `operation not permitted`. Real managed Kubernetes (EKS/GKE/AKS) doesn't hit this at all. |
 
@@ -657,11 +657,13 @@ labeled, never filled with invented numbers:
 
 | # | Item | Who | Effort | Technical detail |
 |---|---|---|---|---|
-| 1 | Flip 4 GHCR packages to public | **You** | 5 min | Confirmed via direct `gh api -X PATCH .../visibility` testing: 404 on GitHub's own documented endpoint despite a working `GET` and correct `write:packages` scope. Web-UI-only control, not scriptable. |
-| 2 | An actual second cloud deployed with the new GCP price book | You | 5 min per agent | Plumbing is 100% real and tested (`pricebook/gcp.yaml`, `values-gcp.yaml`, `SpendByCloud()`, the donut). What's missing: a second live agent actually running `-pricebook=pricebook/gcp.yaml` (or `values-gcp.yaml` via Helm) against a real GCP-hosted workload. `helm install -f values.yaml -f values-gcp.yaml`. |
-| 3 | A deeper forecasting model, if Holt's isn't enough | Both | Large | Needs (a) enough retained history to fit a seasonal component meaningfully — data is agent-refresh-cadence snapshots, not calendar-aligned, so a real seasonal model needs a time-bucketing decision first; (b) a genuine choice between ARIMA/Prophet/a small neural sequence model, each with different data-volume requirements this system hasn't validated it has. |
-| 4 | Frontend bundle size (930KB, no code-splitting) | Me | Small | `React.lazy()` + dynamic `import()` per sidebar page — Overview + Sidebar are the only things needed on first paint; the other 14 pages could each be their own chunk. |
-| 5 | Business/GTM (pricing, personas, launch) | You | Deprioritized | No pricing page, no persona docs, no launch plan — explicitly deprioritized per prior direction ("technical completeness came first"). |
+| 1 | An actual second cloud deployed with the new GCP price book | You | Blocked | Plumbing is 100% real and tested (`pricebook/gcp.yaml`, `values-gcp.yaml`, `SpendByCloud()`, the donut) — verified by walking through the actual deploy steps live (Cloud Shell, `gcloud compute instances create`). Blocked on a real, non-technical wall: this GCP project has no billing account, and India requires a ~₹15,000 refundable deposit to activate one. Deliberately not pushed through — that's real money, not a 5-minute task, and it's not worth spending to prove plumbing that's already tested. Options if this gets revisited: pay the deposit, or retarget `values-gcp.yaml`'s pattern at a genuinely free-tier host (e.g. Oracle Cloud) with a new price book file. |
+| 2 | A deeper forecasting model, if Holt's isn't enough | Both | Large | Needs (a) enough retained history to fit a seasonal component meaningfully — data is agent-refresh-cadence snapshots, not calendar-aligned, so a real seasonal model needs a time-bucketing decision first; (b) a genuine choice between ARIMA/Prophet/a small neural sequence model, each with different data-volume requirements this system hasn't validated it has. |
+| 3 | Business/GTM (pricing, personas, launch) | You | Deprioritized | No pricing page, no persona docs, no launch plan — explicitly deprioritized per prior direction ("technical completeness came first"). |
+
+**Done since the last version of this table**:
+- Flipping the 4 GHCR packages to public (was item #1) — verified for real: fully logged-out `docker pull` of both container images, and anonymous GHCR-token `tags/list` calls against both OCI Helm charts, all succeeding with no credentials involved.
+- Frontend bundle code-splitting (was item #4) — `React.lazy()` + `Suspense` now wraps all 11 non-Overview sidebar pages (`controlplane/web/src/App.tsx`); each is its own chunk (11 new files in `dist/assets/`, ~1.5–8KB each, `FeaturePages`'s four exports dedupe into one shared chunk since Rollup collapses same-module dynamic imports). The main bundle is still large (~1.1MB) because that size is dominated by vendor libraries (React, Framer Motion, GSAP, Recharts, Supabase client), not app page code — vendor-chunk splitting would be the next lever if this needs to go further, not attempted here since it wasn't what was asked. Re-running the E2E suite after this change surfaced and fixed a real pre-existing test race in `dashboard.spec.ts` (asserted on page text before the async dashboard-summary fetch resolved) — noted here since it was found doing this work, not a new gap.
 
 **Done since the last version of this table**: CI coverage for
 `controlplane/` (was item #5) — see §6, seven jobs now, `controlplane/`
