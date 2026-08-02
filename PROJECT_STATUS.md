@@ -1,6 +1,6 @@
 # chidrixx — Project & Technical Status (Universal Reference)
 
-_Last updated: 2026-08-03 (a real dry-run closed-loop remediation preview shipped, plus the full re-verification pass: fresh line/file/test counts throughout, corrected a stale agent/ line count, fixed a real internal contradiction on bundle code-splitting, refreshed live-cluster stats against a freshly pulled+integrity-checked database copy, and corrected a stale "zero rows" claim about the outcome dataset)_
+_Last updated: 2026-08-03 (a real dry-run closed-loop remediation preview and a real offline placement simulator both shipped, plus a full re-verification pass earlier the same day: fresh line/file/test counts throughout, corrected a stale agent/ line count, fixed a real internal contradiction on bundle code-splitting, refreshed live-cluster stats against a freshly pulled+integrity-checked database copy, and corrected a stale "zero rows" claim about the outcome dataset)_
 
 This is the single, complete picture of chidrixx: what's real and
 verified, what's explicitly not built (and why), what's actually left to
@@ -9,14 +9,14 @@ underneath every claim: which file, which function, which DB column,
 which test, which command proved it. Nothing here is recalled from
 memory; every number in this update was freshly re-measured against the
 actual repository, not carried forward from an earlier pass — commit at
-write time: `git log -1` → `a031a4b`, "controlplane: real dry-run
-closed-loop remediation preview". Verified by running `go build`,
-`go test`, `go test -race`, `gofmt -l`, `find`/`wc`/`grep`, `docker
-build`, `helm lint`/`template`, live Playwright/curl passes, and — for
-the live-cluster claims specifically — `kubectl top`, `EXPLAIN QUERY
-PLAN`, and a fresh `kubectl cp` + `PRAGMA integrity_check` pull of the
-actual production database — all against both a real k3d cluster and a
-real running `controlplane`
+write time: `git log -1` → `99f9548`, "controlplane: real offline
+placement simulator (idea #2, safe increment)". Verified by running
+`go build`, `go test`, `go test -race`, `gofmt -l`, `find`/`wc`/`grep`,
+`docker build`, `helm lint`/`template`, live Playwright/curl passes, and
+— for the live-cluster claims specifically — `kubectl top`, `EXPLAIN
+QUERY PLAN`, and a fresh `kubectl cp` + `PRAGMA integrity_check` pull of
+the actual production database — all against both a real k3d cluster
+and a real running `controlplane`
 server, not written and
 assumed to work.
 
@@ -39,8 +39,8 @@ chidrixx/
 │   └── cmd/
 │       ├── kharcha/     the eBPF agent binary          — 12 test files, 26 test functions
 │       └── loadgen/     load-test traffic generator (no tests)
-├── controlplane/        module `chidrixx-controlplane` — 4,462 lines Go (excl. tests), 31 files
-│   ├── web/             React/Vite/TS dashboard SPA    — 4,940 lines TS/TSX, 35 .tsx + 10 .ts files
+├── controlplane/        module `chidrixx-controlplane` — 4,787 lines Go (excl. tests), 33 files
+│   ├── web/             React/Vite/TS dashboard SPA    — 5,061 lines TS/TSX, 36 .tsx + 10 .ts files
 │   └── e2e/             committed Playwright E2E suite — 10 .ts files (§3.10)
 ├── bpf/                 flow_cgroup.c + compiled flow_cgroup.o (committed binary, go:embed'd)
 ├── pricebook/            aws.yaml, gcp.yaml — real cited price data
@@ -49,7 +49,7 @@ chidrixx/
 └── .github/workflows/   ci.yml — 7 jobs, both modules (§6)
 ```
 
-Total: **~12,600 lines** of hand-written Go + TypeScript across both
+Total: **~13,000 lines** of hand-written Go + TypeScript across both
 modules and the frontend (not counting vendored react-bits `.jsx`/`.css`
 files, which are third-party, installed via the real `shadcn` CLI; not
 counting the separate 10-file E2E suite). All four counts above were
@@ -220,7 +220,7 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
   `bpf/flow_cgroup.o`) and `go:embed`'d — `go build`/`go test` need no
   Node install. 15 sidebar pages total (full list in §4).
 
-### 3.2 API routes — 16 real endpoints + the static SPA shell route, exact
+### 3.2 API routes — 17 real endpoints + the static SPA shell route, exact
 
 | Route | Method(s) | Auth | Handler |
 |---|---|---|---|
@@ -236,7 +236,8 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
 | `/api/v1/chat` | POST | `requireSession` | `handleChat` (503 if `GROQ_API_KEY` unset) |
 | `/api/v1/anomalies/narrate` | POST | `requireSession` | `handleNarrateAnomaly` (503 if `GROQ_API_KEY` unset) |
 | `/api/v1/forecast` | GET | `requireSession` | `handleForecast` — `?cluster_id=X`, real backtested model selection (§3.14) |
-| `/api/v1/remediation/preview` **(new)** | GET | `requireSession` | `handleRemediationPreview` — real dry-run auto-remediation policy evaluation, never mutates anything (§3.16) |
+| `/api/v1/remediation/preview` | GET | `requireSession` | `handleRemediationPreview` — real dry-run auto-remediation policy evaluation, never mutates anything (§3.16) |
+| `/api/v1/placement/preview` **(new)** | GET | `requireSession` | `handlePlacementPreview` — real offline graph-partitioning simulation, `?groups=N` (§3.17) |
 | `/api/v1/auth/me` | GET | `requireSession` | `handleMe` |
 | `/api/v1/auth/login` | POST | none (that's the point) | `handleLogin` |
 | `/api/v1/auth/logout` | POST | none | `handleLogout` |
@@ -269,7 +270,7 @@ column name" errors swallowed) except the `settings` table rebuild,
 which detects the old schema via `sqlite_master.sql` and does a real
 `CREATE new → INSERT SELECT → DROP → RENAME` inside one transaction.
 
-### 3.4 Control plane file-by-file (31 files)
+### 3.4 Control plane file-by-file (33 files)
 
 | File | Role |
 |---|---|
@@ -303,7 +304,9 @@ which detects the old schema via `sqlite_master.sql` and does a real
 | `forecast_api.go` | `handleForecast` — `GET /api/v1/forecast?cluster_id=X`. |
 | `summary.go` | `computeSummary`/`computeSpendByClass`/`computeSpendByCloud` — pure Go aggregation over already-fetched findings, replacing 3 redundant SQL scans (§3.15). |
 | `remediation.go` **(new)** | `RemediationPolicy`, `EvaluateRemediation` — real dry-run closed-loop remediation policy engine (§3.16). |
-| `remediation_api.go` **(new)** | `handleRemediationPreview` — `GET /api/v1/remediation/preview`. |
+| `remediation_api.go` | `handleRemediationPreview` — `GET /api/v1/remediation/preview`. |
+| `placement.go` **(new)** | `buildPlacementGraph`, `OptimizePlacement` — real Kernighan-Lin graph partitioning with multi-restart (§3.17). |
+| `placement_api.go` **(new)** | `handlePlacementPreview` — `GET /api/v1/placement/preview?groups=N`. |
 
 ### 3.5 Control plane dependencies (`go.mod`, exact versions)
 
@@ -314,7 +317,7 @@ own transitive requirements (libc, mathutil, memory, bigfft, etc.) plus
 dependencies — it's a plain `net/http` client against Groq's
 OpenAI-compatible REST API, not an SDK.
 
-### 3.6 Control plane test inventory — 139 test functions across 22 files
+### 3.6 Control plane test inventory — 154 test functions across 24 files
 
 | File | Approx. tests | Covers |
 |---|---|---|
@@ -334,7 +337,8 @@ OpenAI-compatible REST API, not an SDK.
 | `anomaly_narrator_test.go` | 6 | Prompt grounding (with/without a real likely cause), 503/404/tenant-isolation at the API layer |
 | `forecast_test.go` | 11 | Synthetic linear series picks plain Holt / synthetic plateauing series picks damped Holt (both asserted via real measured MAE), honest zero-fold fallback with too little history, damped-never-exceeds-undamped invariant, a real wall-clock budget at 4,200-point production scale, API layer (400/tenant-isolation/end-to-end) |
 | `summary_test.go` | 5 | Pure Go aggregation functions cross-checked against the same fixtures/expected values as the original SQL-based `Summary`/`SpendByClass`/`SpendByCloud` tests in `store_test.go` |
-| `remediation_test.go` + `remediation_api_test.go` **(new)** | 9 | Each qualifying/disqualifying policy reason checked individually, a real no-mutation guarantee, API-layer tenant isolation |
+| `remediation_test.go` + `remediation_api_test.go` | 9 | Each qualifying/disqualifying policy reason checked individually, a real no-mutation guarantee, API-layer tenant isolation |
+| `placement_test.go` + `placement_api_test.go` **(new)** | 15 | Synthetic graphs with analytically-known-correct answers (disconnected pairs, a triangle, a 4-workload/2-pair case proving the algorithm finds the mathematically best co-location, not just *a* local optimum), a real wall-clock budget at 100-workload scale, API layer |
 
 Two new tests in `store_test.go` guard the WAL/connection-pool change
 specifically: `TestOpenStoreConnectionsShareRealDataAgainstAFile` (8 real
@@ -342,7 +346,7 @@ concurrent connections against a real file all see the same real
 ingested row) and the `:memory:`-stays-single-connection guard baked
 into `OpenStore` itself.
 
-Run: `cd controlplane && go test ./...` — **all 139 passing** (re-verified
+Run: `cd controlplane && go test ./...` — **all 154 passing** (re-verified
 2026-08-02), ~13–34s wall time depending on cache (several tests use
 real 1.1s sleeps to get distinct `reported_at` second-granularity
 timestamps).
@@ -773,11 +777,64 @@ Live-verified in a real browser against 3 real findings spanning all
 three disqualifying reasons plus the qualifying case; screenshotted and
 confirmed each displayed reason was correct.
 
+### 3.17 Real offline placement simulator (`placement.go`/`placement_api.go`)
+
+The safe, offline first increment of "idea #2" from the S+-innovation
+discussion (a cost-aware placement algorithm): a real Kernighan-Lin
+graph-partitioning heuristic answering "how much of this cluster's real
+cross-zone cost is avoidable by co-locating workloads that talk to each
+other a lot" — computed entirely from already-ingested real `CROSS_AZ`
+findings, zero live-cluster access, zero new agent capability. Checked
+what data actually exists before designing anything: the agent resolves
+real zone identity per node at classification time
+(`agent/cmd/kharcha/classify.go`) but only ships the resulting
+`CROSS_AZ`/`SAME_AZ`/etc. label to the control plane, not raw zone
+identity — so this can only answer "what's the best K-way split of this
+communication graph," not "move workload X from us-east-1a to
+us-east-1b." That would need a real agent change, not attempted here.
+
+**Two real bugs caught and fixed before shipping, neither by assumption:**
+1. The first version (single-node moves, no constraint) trivially
+   collapsed every graph to 1 group — caught by a real test (a fully-
+   connected triangle falsely reporting 0 avoidable cost). Fixed by
+   requiring every one of the `numGroups` real zones to stay non-empty
+   throughout — the honest framing: `numGroups` means "zones you need
+   genuine redundant presence across" (e.g. real multi-AZ HA), not an
+   arbitrary bucket count.
+2. That fix introduced real order-dependency, caught by hand while
+   screenshotting the live feature: a 4-workload/2-real-pair/3-zone
+   example converged to only the *smaller* of two possible savings
+   amounts, purely because of which pair the arbitrary initial split
+   happened to favor. Pairwise swaps (the textbook Kernighan-Lin
+   mechanism) were tried next and traced to preserve the initial group-
+   size distribution forever, so they couldn't fix this either. The
+   real fix: multiple deterministic restarts from varied initial splits,
+   keeping whichever converges to the lowest real cost — re-verified
+   live afterward that it now correctly finds the mathematically best
+   answer (co-locating the *costlier* pair), not just re-trusted.
+
+`GET /api/v1/placement/preview?groups=N` (default 3, any authenticated
+role, read-only, computed on demand — no new persistence). New
+`PlacementSimulatorCard.tsx` on the Cost Graph page (the natural home,
+already about topology), with a zone-count selector and copy stating
+plainly what "N zones" means and what real constraints (node capacity,
+resource limits, anti-affinity) this doesn't model.
+
+Verified: 15 new Go tests, including synthetic graphs with analytically-
+known-correct answers (disconnected pairs, a triangle, the 4-workload/
+2-pair case asserting the *specific* costlier-pair co-location, not just
+*some* improvement) and a real wall-clock budget test at 100-workload
+scale (following §3.15's hard lesson about shipping without one). Full
+Go suite green (154 tests). Live-verified against a real running server
+twice — the second pass is what caught the order-dependency bug, then
+re-verified the rewritten algorithm live afterward. E2E suite extended
+and green (21/21).
+
 ---
 
 ## 4. Frontend — component inventory
 
-35 `.tsx` files + 10 `.ts` files (excluding `.d.ts`), 4,940 lines in
+36 `.tsx` files + 10 `.ts` files (excluding `.d.ts`), 5,061 lines in
 `src/` — re-counted directly against the tree, not carried forward from
 an earlier session's number. Separately, `e2e/` holds 10 more `.ts`
 files (the committed Playwright suite, §3.10 — a distinct concern from
@@ -809,6 +866,7 @@ Anomalies, History, Reports, Automations, Settings.
 | `apiFetch.ts` | Single chokepoint attaching a Supabase bearer token to every authenticated frontend call |
 | `supabaseClient.ts` | Real `createClient(url, publishableKey)`, fails loudly if env vars are missing rather than silently degrading |
 | `session.ts` | `SessionContext`/`Session` type shared across the app |
+| `PlacementSimulatorCard.tsx` | The real offline placement-optimization UI (§3.17) — zone-count selector, calls `GET /api/v1/placement/preview`, rendered on Cost Graph |
 
 ### 4.3 Frontend build output (measured, current — rebuilt as part of this update)
 
@@ -1108,9 +1166,9 @@ root-cause correlation, real $ optimization recommendations, a real
 historical trend-change view, a real cost topology graph, a real
 predictive driver, real closed-loop recommendation-outcome tracking,
 a real Groq-backed grounded chat assistant, a real anomaly root-cause
-narrator, a real deeper forecasting model, and a real dry-run closed-
-loop remediation preview — not a static mockup or a single-shared-secret
-toy.
+narrator, a real deeper forecasting model, a real dry-run closed-loop
+remediation preview, and a real offline placement simulator — not a
+static mockup or a single-shared-secret toy.
 
 `controlplane/` now has the same CI coverage `agent/` always had (§6,
 seven jobs total: build/test/Docker/Helm for both modules plus a real
@@ -1130,7 +1188,11 @@ concurrency bug along the way. The remediation preview (§3.16) is
 deliberately the safe, evidence-gathering first step of a bigger idea
 (closed-loop automatic remediation) — real policy, real transparency,
 zero cluster write access, not a shortcut to the harder, riskier version
-of the feature.
+of the feature. The placement simulator (§3.17) is the equally safe
+first step of the other big idea (a cost-aware placement algorithm) —
+a real graph-partitioning algorithm with two real bugs caught and fixed
+by actually testing and screenshotting it, not a black box trusted on
+faith.
 
 What's genuinely left, in priority order (§8): a real second-cloud agent
 deployment is blocked on a real, non-technical wall (India's GCP billing
