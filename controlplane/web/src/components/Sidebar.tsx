@@ -6,6 +6,7 @@ import {
   IconBell,
   IconBulb,
   IconCalendar,
+  IconChat,
   IconFile,
   IconGear,
   IconGrid,
@@ -30,6 +31,7 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { id: "overview", label: "Overview", icon: IconGrid, real: true },
+  { id: "assistant", label: "Assistant", icon: IconChat, real: true },
   { id: "insights", label: "Insights", icon: IconBulb, real: true },
   { id: "explorer", label: "Explorer", icon: IconSearch, real: true },
   { id: "workloads", label: "Workloads", icon: IconLayers, real: true },

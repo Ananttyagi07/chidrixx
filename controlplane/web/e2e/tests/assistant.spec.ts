@@ -1,0 +1,29 @@
+import { test, expect } from "@playwright/test";
+import { ADMIN_PASSWORD, ADMIN_USER } from "../env";
+
+// The E2E harness deliberately never sets GROQ_API_KEY (same reasoning as
+// Supabase auth in playwright.config.ts's comment): no real secret needed
+// to run hermetically in CI. This proves the assistant fails honestly --
+// a real 503 surfaced in the UI, not a crash or a silent fake reply --
+// when it isn't configured. The real Groq-backed conversation is verified
+// separately, by hand, against the actual API (see PROJECT_STATUS.md).
+test.beforeEach(async ({ context }) => {
+  const res = await context.request.post("/api/v1/auth/login", {
+    data: { username: ADMIN_USER, password: ADMIN_PASSWORD },
+  });
+  expect(res.ok()).toBeTruthy();
+});
+
+test("Assistant page shows an honest not-configured state, not a crash", async ({ page }) => {
+  await page.goto("/");
+  await page.getByText("Assistant", { exact: true }).click();
+  await expect(page.getByText("Ask about your real cost data")).toBeVisible({ timeout: 10_000 });
+
+  await page.getByText("What should I fix first, and why?").click();
+  await expect(page.getByText(/isn't configured on this control plane/i)).toBeVisible({ timeout: 10_000 });
+});
+
+test("a direct POST to /api/v1/chat returns a real 503 when unconfigured", async ({ page }) => {
+  const res = await page.request.post("/api/v1/chat", { data: { message: "hi" } });
+  expect(res.status()).toBe(503);
+});

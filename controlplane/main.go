@@ -58,6 +58,21 @@ func main() {
 		log.Println("SUPABASE_URL/SUPABASE_PUBLISHABLE_KEY not set — Supabase-backed login disabled, cookie/CLI auth only")
 	}
 
+	// The grounded chat assistant is opt-in via GROQ_API_KEY, same pattern
+	// as Supabase auth above -- unset means /api/v1/chat honestly returns
+	// 503 instead of the dashboard crashing or silently doing nothing.
+	// GROQ_MODEL lets an operator swap models without a rebuild; Groq
+	// (not a self-hosted model) because reliable tool-calling needs real
+	// GPU inference, and this control plane deliberately runs on
+	// commodity CPU-only hosts.
+	var groq *GroqClient
+	if apiKey := os.Getenv("GROQ_API_KEY"); apiKey != "" {
+		groq = NewGroqClient(apiKey, os.Getenv("GROQ_MODEL"))
+		log.Println("groq-backed chat assistant enabled")
+	} else {
+		log.Println("GROQ_API_KEY not set — chat assistant disabled")
+	}
+
 	// The static SPA shell carries no secrets (no data is embedded at
 	// build time — everything real is fetched from the API below), so it
 	// serves publicly. The actual data endpoints stay behind real auth:
@@ -73,6 +88,7 @@ func main() {
 	api.HandleFunc("/api/v1/workload-growth", requireSession(store, supabaseAuth, handleWorkloadGrowth(store)))
 	api.HandleFunc("/api/v1/outcomes", requireSession(store, supabaseAuth, handleOutcomes(store)))
 	api.HandleFunc("/api/v1/outcomes/apply", requireSession(store, supabaseAuth, handleMarkOutcomeApplied(store)))
+	api.HandleFunc("/api/v1/chat", requireSession(store, supabaseAuth, handleChat(store, groq)))
 	api.HandleFunc("/api/v1/auth/me", requireSession(store, supabaseAuth, handleMe))
 
 	mux := http.NewServeMux()

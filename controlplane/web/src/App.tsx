@@ -36,6 +36,7 @@ const ExplorerPage = lazy(() => import("./components/ExplorerPage").then((m) => 
 const WorkloadsPage = lazy(() => import("./components/WorkloadsPage").then((m) => ({ default: m.WorkloadsPage })));
 const HistoryPage = lazy(() => import("./components/HistoryPage").then((m) => ({ default: m.HistoryPage })));
 const CostGraphPage = lazy(() => import("./components/CostGraphPage").then((m) => ({ default: m.CostGraphPage })));
+const AssistantPage = lazy(() => import("./components/AssistantPage").then((m) => ({ default: m.AssistantPage })));
 const BudgetsPage = lazy(() => import("./components/FeaturePages").then((m) => ({ default: m.BudgetsPage })));
 const AnomaliesPage = lazy(() => import("./components/FeaturePages").then((m) => ({ default: m.AnomaliesPage })));
 const ForecastingPage = lazy(() => import("./components/FeaturePages").then((m) => ({ default: m.ForecastingPage })));
@@ -233,6 +234,12 @@ function Dashboard({ session, onLogout }: { session: Session; onLogout: () => vo
             <motion.div key="cost-graph" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <Suspense fallback={<Skeleton />}>
                 <CostGraphPage />
+              </Suspense>
+            </motion.div>
+          ) : active === "assistant" ? (
+            <motion.div key="assistant" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <Suspense fallback={<Skeleton />}>
+                <AssistantPage />
               </Suspense>
             </motion.div>
           ) : active in DATA_PAGES ? (

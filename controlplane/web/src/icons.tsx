@@ -193,3 +193,12 @@ export function IconConstruction({ className }: IconProps) {
     </svg>
   );
 }
+
+export function IconChat({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" strokeWidth={1.6} className={`${base} ${className ?? ""}`}>
+      <path d="M3 4.5h14v9H8.5L5 16.5v-3H3z" strokeLinejoin="round" />
+      <path d="M6.5 8h7M6.5 10.5h4.5" strokeLinecap="round" />
+    </svg>
+  );
+}
