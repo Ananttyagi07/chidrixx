@@ -66,3 +66,76 @@ jobs:
       - uses: azure/setup-helm@v4
       - run: helm lint deploy/helm/kharcha
       - run: helm template deploy/helm/kharcha
+
+  build-and-test-controlplane:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: controlplane
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: gofmt check
+        run: |
+          diff <(gofmt -l .) <(printf "")
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test ./... -v
+
+  docker-build-controlplane:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build the controlplane image
+        run: docker build -t chidrixx-controlplane:ci controlplane
+
+  helm-lint-controlplane:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint deploy/helm/controlplane
+      - run: helm template deploy/helm/controlplane
+
+  e2e-controlplane:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: npm ci
+        working-directory: controlplane/web
+        run: npm ci
+
+      # GitHub-hosted ubuntu-latest runners ship Google Chrome preinstalled
+      # at this path -- playwright.config.ts launches it directly rather
+      # than Playwright's own bundled Chromium, the same approach used for
+      # local development, so no `playwright install --with-deps` step is
+      # needed here.
+      - name: run the real E2E suite (builds the actual binary, provisions a real tenant, runs a real server)
+        working-directory: controlplane/web
+        run: npm run test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: controlplane/web/test-results/
+          retention-days: 7
