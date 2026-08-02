@@ -1,6 +1,6 @@
 # chidrixx — Project & Technical Status (Universal Reference)
 
-_Last updated: 2026-08-03 (full re-verification pass: fresh line/file/test counts throughout, corrected a stale agent/ line count, fixed a real internal contradiction on bundle code-splitting, refreshed live-cluster stats against a freshly pulled+integrity-checked database copy — 2,229,443 real rows, Helm revision 8, 24 real outcome-tracking rows — and corrected a stale "zero rows" claim about the outcome dataset)_
+_Last updated: 2026-08-03 (a real dry-run closed-loop remediation preview shipped, plus the full re-verification pass: fresh line/file/test counts throughout, corrected a stale agent/ line count, fixed a real internal contradiction on bundle code-splitting, refreshed live-cluster stats against a freshly pulled+integrity-checked database copy, and corrected a stale "zero rows" claim about the outcome dataset)_
 
 This is the single, complete picture of chidrixx: what's real and
 verified, what's explicitly not built (and why), what's actually left to
@@ -8,17 +8,15 @@ do, and — merged into this same file — the exhaustive engineering detail
 underneath every claim: which file, which function, which DB column,
 which test, which command proved it. Nothing here is recalled from
 memory; every number in this update was freshly re-measured against the
-actual repository and the actual live deployment, not carried forward
-from an earlier pass — commit at write time: `git log -1` →
-`3de42ca`, "docs: update PROJECT_STATUS.md for the live performance
-investigation" (this pass's own edits are docs-only, no new commit
-needed until they land). Verified by running `go build`, `go test`,
-`go test -race`, `gofmt -l`, `find`/`wc`/`grep`, `docker build`, `helm
-lint`/`template`, live Playwright/curl passes, and — for the live-
-cluster claims specifically — `kubectl top`, `EXPLAIN QUERY PLAN`, and a
-fresh `kubectl cp` + `PRAGMA integrity_check` pull of the actual
-production database — all against both a real k3d cluster and a real
-running `controlplane`
+actual repository, not carried forward from an earlier pass — commit at
+write time: `git log -1` → `a031a4b`, "controlplane: real dry-run
+closed-loop remediation preview". Verified by running `go build`,
+`go test`, `go test -race`, `gofmt -l`, `find`/`wc`/`grep`, `docker
+build`, `helm lint`/`template`, live Playwright/curl passes, and — for
+the live-cluster claims specifically — `kubectl top`, `EXPLAIN QUERY
+PLAN`, and a fresh `kubectl cp` + `PRAGMA integrity_check` pull of the
+actual production database — all against both a real k3d cluster and a
+real running `controlplane`
 server, not written and
 assumed to work.
 
@@ -41,8 +39,8 @@ chidrixx/
 │   └── cmd/
 │       ├── kharcha/     the eBPF agent binary          — 12 test files, 26 test functions
 │       └── loadgen/     load-test traffic generator (no tests)
-├── controlplane/        module `chidrixx-controlplane` — 4,315 lines Go (excl. tests), 29 files
-│   ├── web/             React/Vite/TS dashboard SPA    — 4,824 lines TS/TSX, 35 .tsx + 10 .ts files
+├── controlplane/        module `chidrixx-controlplane` — 4,462 lines Go (excl. tests), 31 files
+│   ├── web/             React/Vite/TS dashboard SPA    — 4,940 lines TS/TSX, 35 .tsx + 10 .ts files
 │   └── e2e/             committed Playwright E2E suite — 10 .ts files (§3.10)
 ├── bpf/                 flow_cgroup.c + compiled flow_cgroup.o (committed binary, go:embed'd)
 ├── pricebook/            aws.yaml, gcp.yaml — real cited price data
@@ -51,7 +49,7 @@ chidrixx/
 └── .github/workflows/   ci.yml — 7 jobs, both modules (§6)
 ```
 
-Total: **~12,300 lines** of hand-written Go + TypeScript across both
+Total: **~12,600 lines** of hand-written Go + TypeScript across both
 modules and the frontend (not counting vendored react-bits `.jsx`/`.css`
 files, which are third-party, installed via the real `shadcn` CLI; not
 counting the separate 10-file E2E suite). All four counts above were
@@ -222,7 +220,7 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
   `bpf/flow_cgroup.o`) and `go:embed`'d — `go build`/`go test` need no
   Node install. 15 sidebar pages total (full list in §4).
 
-### 3.2 API routes — 15 real endpoints + the static SPA shell route, exact
+### 3.2 API routes — 16 real endpoints + the static SPA shell route, exact
 
 | Route | Method(s) | Auth | Handler |
 |---|---|---|---|
@@ -237,7 +235,8 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
 | `/api/v1/outcomes/apply` **(new)** | POST | `requireSession` | `handleMarkOutcomeApplied` |
 | `/api/v1/chat` | POST | `requireSession` | `handleChat` (503 if `GROQ_API_KEY` unset) |
 | `/api/v1/anomalies/narrate` | POST | `requireSession` | `handleNarrateAnomaly` (503 if `GROQ_API_KEY` unset) |
-| `/api/v1/forecast` **(new)** | GET | `requireSession` | `handleForecast` — `?cluster_id=X`, real backtested model selection (§3.14) |
+| `/api/v1/forecast` | GET | `requireSession` | `handleForecast` — `?cluster_id=X`, real backtested model selection (§3.14) |
+| `/api/v1/remediation/preview` **(new)** | GET | `requireSession` | `handleRemediationPreview` — real dry-run auto-remediation policy evaluation, never mutates anything (§3.16) |
 | `/api/v1/auth/me` | GET | `requireSession` | `handleMe` |
 | `/api/v1/auth/login` | POST | none (that's the point) | `handleLogin` |
 | `/api/v1/auth/logout` | POST | none | `handleLogout` |
@@ -270,7 +269,7 @@ column name" errors swallowed) except the `settings` table rebuild,
 which detects the old schema via `sqlite_master.sql` and does a real
 `CREATE new → INSERT SELECT → DROP → RENAME` inside one transaction.
 
-### 3.4 Control plane file-by-file (29 files)
+### 3.4 Control plane file-by-file (31 files)
 
 | File | Role |
 |---|---|
@@ -302,7 +301,9 @@ which detects the old schema via `sqlite_master.sql` and does a real
 | `anomaly_narrator_api.go` | `handleNarrateAnomaly` — `POST /api/v1/anomalies/narrate`, re-derives the anomaly fresh server-side. |
 | `forecast.go` **(new)** | `holtFit`/`holtForecastAhead` (damped-trend generalized Holt), `fitBestHolt`, `backtestMAE` (rolling-origin validation), `ComputeDeepForecast` (the model-selection entry point). |
 | `forecast_api.go` | `handleForecast` — `GET /api/v1/forecast?cluster_id=X`. |
-| `summary.go` **(new)** | `computeSummary`/`computeSpendByClass`/`computeSpendByCloud` — pure Go aggregation over already-fetched findings, replacing 3 redundant SQL scans (§3.15). |
+| `summary.go` | `computeSummary`/`computeSpendByClass`/`computeSpendByCloud` — pure Go aggregation over already-fetched findings, replacing 3 redundant SQL scans (§3.15). |
+| `remediation.go` **(new)** | `RemediationPolicy`, `EvaluateRemediation` — real dry-run closed-loop remediation policy engine (§3.16). |
+| `remediation_api.go` **(new)** | `handleRemediationPreview` — `GET /api/v1/remediation/preview`. |
 
 ### 3.5 Control plane dependencies (`go.mod`, exact versions)
 
@@ -313,7 +314,7 @@ own transitive requirements (libc, mathutil, memory, bigfft, etc.) plus
 dependencies — it's a plain `net/http` client against Groq's
 OpenAI-compatible REST API, not an SDK.
 
-### 3.6 Control plane test inventory — 130 test functions across 20 files
+### 3.6 Control plane test inventory — 139 test functions across 22 files
 
 | File | Approx. tests | Covers |
 |---|---|---|
@@ -332,7 +333,8 @@ OpenAI-compatible REST API, not an SDK.
 | `chat_test.go` | 12 | Groq client against a fake server, the tool-calling loop (success/unknown-tool/max-rounds/retry), tenant-scoped tool isolation, `parseLenientInt`, the full HTTP handler |
 | `anomaly_narrator_test.go` | 6 | Prompt grounding (with/without a real likely cause), 503/404/tenant-isolation at the API layer |
 | `forecast_test.go` | 11 | Synthetic linear series picks plain Holt / synthetic plateauing series picks damped Holt (both asserted via real measured MAE), honest zero-fold fallback with too little history, damped-never-exceeds-undamped invariant, a real wall-clock budget at 4,200-point production scale, API layer (400/tenant-isolation/end-to-end) |
-| `summary_test.go` **(new)** | 5 | Pure Go aggregation functions cross-checked against the same fixtures/expected values as the original SQL-based `Summary`/`SpendByClass`/`SpendByCloud` tests in `store_test.go` |
+| `summary_test.go` | 5 | Pure Go aggregation functions cross-checked against the same fixtures/expected values as the original SQL-based `Summary`/`SpendByClass`/`SpendByCloud` tests in `store_test.go` |
+| `remediation_test.go` + `remediation_api_test.go` **(new)** | 9 | Each qualifying/disqualifying policy reason checked individually, a real no-mutation guarantee, API-layer tenant isolation |
 
 Two new tests in `store_test.go` guard the WAL/connection-pool change
 specifically: `TestOpenStoreConnectionsShareRealDataAgainstAFile` (8 real
@@ -340,7 +342,7 @@ concurrent connections against a real file all see the same real
 ingested row) and the `:memory:`-stays-single-connection guard baked
 into `OpenStore` itself.
 
-Run: `cd controlplane && go test ./...` — **all 130 passing** (re-verified
+Run: `cd controlplane && go test ./...` — **all 139 passing** (re-verified
 2026-08-02), ~13–34s wall time depending on cache (several tests use
 real 1.1s sleeps to get distinct `reported_at` second-granularity
 timestamps).
@@ -729,11 +731,53 @@ for `flow_aggregate` would cut the residual ~5.8s further, but both are
 bigger decisions (a schema migration; a real data-retention policy) than
 a bug fix — left for a separate call if it matters later.
 
+### 3.16 Real dry-run closed-loop remediation preview (`remediation.go`/`remediation_api.go`)
+
+The safe first increment of "closed-loop remediation" — one of three
+directions considered for making the product genuinely differentiated,
+not just well-engineered (the other two: a cost-aware placement
+algorithm validated on real traces, and an eventual cross-customer
+reference dataset, both still future vision, not started). Checked the
+real fix-manifest generation (`agent/cmd/kharcha/fixengine.go`) before
+designing anything: it's a real `NetworkPolicy` that denies egress to
+one flagged IP with `podSelector: {}` (every pod in the namespace) —
+confirming blind real auto-apply would be genuinely risky, and that a
+transparent, dry-run-only first pass was the right scope, not a
+shortcut.
+
+`EvaluateRemediation` is a real, deterministic policy (pure Go function
+over already-fetched findings, same pattern as `computeSpendByTeam`):
+a fix qualifies as "would auto-apply" only if it has a real generated
+manifest, real high confidence, and real positive predicted savings —
+all three required, and every finding's decision — qualifying or not —
+comes with an explicit real reason, not a silent filter. **Never
+touches a real cluster**: chidrixx still has no write access to any
+cluster (`AutomationsPage.tsx`'s long-standing disclaimer stays
+literally true); this is the evidence-gathering phase before ever
+requesting that access, not a quiet backdoor to it.
+
+`GET /api/v1/remediation/preview` (any authenticated role, read-only)
+serves this computed-on-demand — no new persistence, no new schema.
+`AutomationsPage.tsx` — which already carried the "never applies
+automatically" disclaimer, the natural home for this — gained a
+transparent "Would apply" / "Would skip" breakdown.
+
+Verified: 9 new Go tests (each disqualifying reason checked
+individually — no manifest, low confidence, zero savings — a real
+no-mutation guarantee test documenting that nothing is ever touched,
+API-layer tenant isolation), full suite green. Added a second real E2E
+fixture finding (a real `internet_egress`/high-confidence/manifest-
+bearing fix) so the committed E2E suite exercises the real "would
+apply" path live, not only "would skip" — full suite green (20/20).
+Live-verified in a real browser against 3 real findings spanning all
+three disqualifying reasons plus the qualifying case; screenshotted and
+confirmed each displayed reason was correct.
+
 ---
 
 ## 4. Frontend — component inventory
 
-35 `.tsx` files + 10 `.ts` files (excluding `.d.ts`), 4,824 lines in
+35 `.tsx` files + 10 `.ts` files (excluding `.d.ts`), 4,940 lines in
 `src/` — re-counted directly against the tree, not carried forward from
 an earlier session's number. Separately, `e2e/` holds 10 more `.ts`
 files (the committed Playwright suite, §3.10 — a distinct concern from
@@ -1062,10 +1106,11 @@ capable product: real Supabase-backed public signup alongside the
 original self-hosted CLI path, real self-service team invites, real
 root-cause correlation, real $ optimization recommendations, a real
 historical trend-change view, a real cost topology graph, a real
-predictive driver, real closed-loop recommendation-outcome tracking, and
+predictive driver, real closed-loop recommendation-outcome tracking,
 a real Groq-backed grounded chat assistant, a real anomaly root-cause
-narrator, and a real deeper forecasting model — not a static mockup or a
-single-shared-secret toy.
+narrator, a real deeper forecasting model, and a real dry-run closed-
+loop remediation preview — not a static mockup or a single-shared-secret
+toy.
 
 `controlplane/` now has the same CI coverage `agent/` always had (§6,
 seven jobs total: build/test/Docker/Helm for both modules plus a real
@@ -1081,7 +1126,11 @@ investigation (§3.15) cut the dashboard's slowest real request from
 20-40+ seconds to ~5.8 seconds, root-caused through direct live
 measurement (`kubectl top`, a pulled+integrity-checked database copy,
 `EXPLAIN QUERY PLAN`) rather than guessing, catching a genuine latent
-concurrency bug along the way.
+concurrency bug along the way. The remediation preview (§3.16) is
+deliberately the safe, evidence-gathering first step of a bigger idea
+(closed-loop automatic remediation) — real policy, real transparency,
+zero cluster write access, not a shortcut to the harder, riskier version
+of the feature.
 
 What's genuinely left, in priority order (§8): a real second-cloud agent
 deployment is blocked on a real, non-technical wall (India's GCP billing
