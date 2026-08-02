@@ -338,24 +338,18 @@ export default function App() {
   const [phase, setPhase] = useState<"checking" | "landing" | "login" | "authed">("checking");
   const [session, setSession] = useState<Session | null>(null);
 
-  // Real auth state comes from Supabase (it persists/refreshes the
-  // session in localStorage on its own) -- a Supabase session existing is
-  // what decides whether to even attempt the control-plane resolve/
-  // auto-provision call below, rather than always hitting the API first
-  // and inferring auth state from whether it 401s.
+  // Always ask the control plane, never gate on Supabase session state
+  // alone: apiFetch attaches a Supabase bearer token when one exists, but
+  // the backend also still accepts the legacy session cookie (self-hosted
+  // installs using the create-tenant/create-user CLI, which have no
+  // Supabase session at all). Gating this on "does a Supabase session
+  // exist first" would make that entire auth path unreachable through
+  // the SPA -- a real regression caught while building the E2E suite,
+  // which exercises exactly that path.
   useEffect(() => {
     let cancelled = false;
 
     async function resolve() {
-      const {
-        data: { session: supaSession },
-      } = await supabase.auth.getSession();
-
-      if (!supaSession) {
-        if (!cancelled) setPhase("landing");
-        return;
-      }
-
       const res = await apiFetch("/api/v1/auth/me");
       if (cancelled) return;
       if (!res.ok) {
@@ -390,7 +384,14 @@ export default function App() {
   }
 
   async function handleLogout() {
-    await supabase.auth.signOut();
+    // Revoke both: the Supabase session (if any) and the real backend
+    // cookie session (if any) -- a user could be authenticated via either
+    // path, and leaving the backend session live would mean "log out"
+    // doesn't actually revoke access for cookie-authenticated tenants.
+    await Promise.all([
+      supabase.auth.signOut(),
+      apiFetch("/api/v1/auth/logout", { method: "POST" }),
+    ]);
     setSession(null);
     setPhase("landing");
   }
