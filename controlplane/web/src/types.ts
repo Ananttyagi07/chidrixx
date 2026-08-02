@@ -152,6 +152,13 @@ export interface RemediationPreviewResponse {
   decisions: RemediationDecision[];
 }
 
+export interface OutcomeDatasetStats {
+  total_shown: number;
+  total_applied: number;
+  total_measured: number;
+  mean_abs_prediction_error_inr?: number;
+}
+
 export interface DashboardSummary {
   summary: Summary;
   spend_by_class: ClassSpend[];

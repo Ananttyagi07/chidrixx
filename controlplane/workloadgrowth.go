@@ -37,14 +37,29 @@ type WorkloadGrowth struct {
 // recent appearance, highest increase first, capped at topN. A workload
 // seen only once has nothing to compare against and is excluded, same
 // reasoning as detectAnomalies skipping single-snapshot clusters.
+//
+// This is the one query that reads flow_aggregate_daily as well as raw
+// flow_aggregate (via UNION ALL): "over the retained history" has to keep
+// meaning the workload's real full history even after compaction.go's
+// background loop folds old raw rows into daily rollups and deletes them
+// (see compaction.go) -- otherwise a workload's real "first appearance"
+// would silently drift forward every time old data aged out, quietly
+// changing what "growth" means without anyone asking for that. A daily
+// rollup point (one summed value per real day) is coarser than a raw
+// point (one per real ingest cycle), but it's still a real, honestly
+// summed cost for that day, not a fabricated interpolation.
 func (s *Store) WorkloadCostGrowth(tenantID int64, topN int) ([]WorkloadGrowth, error) {
 	rows, err := s.db.Query(`
-		SELECT cluster_id, src_workload, reported_at, SUM(cost_high_inr)
-		FROM flow_aggregate
-		WHERE tenant_id = ?
-		GROUP BY cluster_id, src_workload, reported_at
-		ORDER BY cluster_id, src_workload, reported_at
-	`, tenantID)
+		SELECT cluster_id, src_workload, ts, SUM(cost) FROM (
+			SELECT cluster_id, src_workload, reported_at AS ts, cost_high_inr AS cost
+			FROM flow_aggregate WHERE tenant_id = ?
+			UNION ALL
+			SELECT cluster_id, src_workload, day AS ts, cost_high_inr AS cost
+			FROM flow_aggregate_daily WHERE tenant_id = ?
+		) combined
+		GROUP BY cluster_id, src_workload, ts
+		ORDER BY cluster_id, src_workload, ts
+	`, tenantID, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("query workload cost history: %w", err)
 	}

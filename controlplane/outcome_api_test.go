@@ -68,6 +68,57 @@ func TestHandleMarkOutcomeAppliedThenReflectedInGet(t *testing.T) {
 	}
 }
 
+func TestHandleOutcomeStatsReflectsRealShownAndAppliedCounts(t *testing.T) {
+	store := testStore(t)
+	tenantID := testTenant(t, store)
+
+	fix := testFindingRow("cluster-a", "checkout/checkout-1", "redis/redis-master", "cross_az", "co-locate zones", 40, 30, 40)
+	if err := store.RecordRecommendationsShown(tenantID, []FindingRow{fix}); err != nil {
+		t.Fatalf("RecordRecommendationsShown: %v", err)
+	}
+
+	req := withTenant(httptest.NewRequest(http.MethodGet, "/api/v1/outcomes/stats", nil), tenantID)
+	rec := httptest.NewRecorder()
+	handleOutcomeStats(store)(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	var got OutcomeDatasetStats
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.TotalShown != 1 || got.TotalApplied != 0 || got.TotalMeasured != 0 {
+		t.Fatalf("unexpected stats: %+v", got)
+	}
+	if got.MeanAbsPredictionErrorINR != nil {
+		t.Fatalf("expected nil mean prediction error with nothing measured, got %v", *got.MeanAbsPredictionErrorINR)
+	}
+}
+
+func TestHandleOutcomeStatsIsIsolatedByTenant(t *testing.T) {
+	store := testStore(t)
+	tenantA := testTenant(t, store)
+	tenantB := testTenant(t, store)
+
+	fix := testFindingRow("cluster-a", "checkout/checkout-1", "redis/redis-master", "cross_az", "co-locate zones", 40, 30, 40)
+	if err := store.RecordRecommendationsShown(tenantA, []FindingRow{fix}); err != nil {
+		t.Fatalf("RecordRecommendationsShown: %v", err)
+	}
+
+	req := withTenant(httptest.NewRequest(http.MethodGet, "/api/v1/outcomes/stats", nil), tenantB)
+	rec := httptest.NewRecorder()
+	handleOutcomeStats(store)(rec, req)
+
+	var got OutcomeDatasetStats
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.TotalShown != 0 {
+		t.Fatalf("tenant b's outcome stats leaked tenant a's data: %+v", got)
+	}
+}
+
 func TestHandleMarkOutcomeAppliedRejectsIncompleteIdentity(t *testing.T) {
 	store := testStore(t)
 	tenantID := testTenant(t, store)

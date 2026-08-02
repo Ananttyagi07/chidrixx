@@ -89,6 +89,30 @@ CREATE TABLE IF NOT EXISTS flow_aggregate (
 );
 CREATE INDEX IF NOT EXISTS idx_flow_aggregate_cluster_time ON flow_aggregate(cluster_id, reported_at);
 
+-- flow_aggregate_daily is the compacted cold tier (see compaction.go): one
+-- real row per (tenant, cluster, day, workload pair) instead of one row
+-- per real ingest cycle, for raw rows old enough to have aged out of the
+-- retention window. sample_count records how many real raw rows were
+-- folded into it, for honest transparency about granularity lost.
+CREATE TABLE IF NOT EXISTS flow_aggregate_daily (
+	id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+	tenant_id                INTEGER NOT NULL,
+	cluster_id               TEXT NOT NULL,
+	day                      INTEGER NOT NULL,
+	src_workload             TEXT NOT NULL,
+	dst_workload_or_endpoint TEXT NOT NULL,
+	path_class               TEXT NOT NULL,
+	bytes_tx                 INTEGER NOT NULL,
+	bytes_rx                 INTEGER NOT NULL,
+	cost_low_inr             REAL NOT NULL,
+	cost_high_inr            REAL NOT NULL,
+	savings_low_inr          REAL NOT NULL DEFAULT 0,
+	savings_high_inr         REAL NOT NULL DEFAULT 0,
+	sample_count             INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_flow_aggregate_daily_key
+	ON flow_aggregate_daily(tenant_id, cluster_id, day, src_workload, dst_workload_or_endpoint, path_class);
+
 CREATE TABLE IF NOT EXISTS settings (
 	tenant_id INTEGER NOT NULL DEFAULT 1,
 	key       TEXT NOT NULL,

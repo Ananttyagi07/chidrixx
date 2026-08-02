@@ -93,6 +93,26 @@ test("Cost Graph's placement simulator shows a real computed result, including t
   });
 });
 
+test("Automations' outcome dataset health shows real shown/applied/measured counts", async ({ page }) => {
+  await page.goto("/");
+  await page.getByText("Automations").click();
+  await expect(page.getByText("Outcome dataset health")).toBeVisible({ timeout: 10_000 });
+
+  // Both real fixtures have a fix_hint, so dashboard-summary's top-fixes
+  // pass has recorded both as shown by now (RecordRecommendationsShown
+  // runs on every dashboard-summary request) -- and, running before the
+  // later "marking a real fix applied" test in this same file/shared
+  // server, real applied/measured counts are still honestly 0 here.
+  await expect(page.getByText("No recommendations marked applied yet")).toBeVisible();
+
+  const res = await page.request.get("/api/v1/outcomes/stats");
+  const body = await res.json();
+  expect(body.total_shown).toBe(2);
+  expect(body.total_applied).toBe(0);
+  expect(body.total_measured).toBe(0);
+  expect(body.mean_abs_prediction_error_inr).toBeUndefined();
+});
+
 test("marking a real fix applied on Overview is tracked server-side, not just a UI toggle", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("checkout").first()).toBeVisible({ timeout: 10_000 });

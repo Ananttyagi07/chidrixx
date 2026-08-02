@@ -39,8 +39,8 @@ chidrixx/
 │   └── cmd/
 │       ├── kharcha/     the eBPF agent binary          — 12 test files, 26 test functions
 │       └── loadgen/     load-test traffic generator (no tests)
-├── controlplane/        module `chidrixx-controlplane` — 4,787 lines Go (excl. tests), 33 files
-│   ├── web/             React/Vite/TS dashboard SPA    — 5,061 lines TS/TSX, 36 .tsx + 10 .ts files
+├── controlplane/        module `chidrixx-controlplane` — 5,122 lines Go (excl. tests), 35 files
+│   ├── web/             React/Vite/TS dashboard SPA    — 5,137 lines TS/TSX, 36 .tsx + 10 .ts files
 │   └── e2e/             committed Playwright E2E suite — 10 .ts files (§3.10)
 ├── bpf/                 flow_cgroup.c + compiled flow_cgroup.o (committed binary, go:embed'd)
 ├── pricebook/            aws.yaml, gcp.yaml — real cited price data
@@ -49,14 +49,12 @@ chidrixx/
 └── .github/workflows/   ci.yml — 7 jobs, both modules (§6)
 ```
 
-Total: **~13,000 lines** of hand-written Go + TypeScript across both
+Total: **~13,400 lines** of hand-written Go + TypeScript across both
 modules and the frontend (not counting vendored react-bits `.jsx`/`.css`
 files, which are third-party, installed via the real `shadcn` CLI; not
 counting the separate 10-file E2E suite). All four counts above were
 re-measured directly against the current tree while writing this
-update, not carried forward from an earlier pass — the agent/ count in
-particular corrects a stale figure from a previous version of this
-document.
+update, not carried forward from an earlier pass.
 
 - **`agent/`** (module `chidrixx`) — the eBPF agent, one per cluster (DaemonSet).
 - **`controlplane/`** (module `chidrixx-controlplane`) — optional multi-cluster
@@ -220,7 +218,7 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
   `bpf/flow_cgroup.o`) and `go:embed`'d — `go build`/`go test` need no
   Node install. 15 sidebar pages total (full list in §4).
 
-### 3.2 API routes — 17 real endpoints + the static SPA shell route, exact
+### 3.2 API routes — 18 real endpoints + the static SPA shell route, exact
 
 | Route | Method(s) | Auth | Handler |
 |---|---|---|---|
@@ -231,8 +229,9 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
 | `/api/v1/teams` | GET / POST / DELETE | `requireSession` (POST+DELETE also `requireAdmin`) | `teamsRoute` |
 | `/api/v1/invites` | GET / POST / DELETE | `requireSession` + `requireAdmin` (all methods, including GET) | `handleInvites` |
 | `/api/v1/workload-growth` | GET | `requireSession` | `handleWorkloadGrowth` |
-| `/api/v1/outcomes` **(new)** | GET | `requireSession` | `handleOutcomes` |
-| `/api/v1/outcomes/apply` **(new)** | POST | `requireSession` | `handleMarkOutcomeApplied` |
+| `/api/v1/outcomes` | GET | `requireSession` | `handleOutcomes` |
+| `/api/v1/outcomes/apply` | POST | `requireSession` | `handleMarkOutcomeApplied` |
+| `/api/v1/outcomes/stats` **(new)** | GET | `requireSession` | `handleOutcomeStats` — real aggregate shown/applied/measured counts + mean prediction error (§3.19) |
 | `/api/v1/chat` | POST | `requireSession` | `handleChat` (503 if `GROQ_API_KEY` unset) |
 | `/api/v1/anomalies/narrate` | POST | `requireSession` | `handleNarrateAnomaly` (503 if `GROQ_API_KEY` unset) |
 | `/api/v1/forecast` | GET | `requireSession` | `handleForecast` — `?cluster_id=X`, real backtested model selection (§3.14) |
@@ -243,11 +242,12 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
 | `/api/v1/auth/logout` | POST | none | `handleLogout` |
 | `/` | GET | none (static SPA shell, no secrets embedded) | `webAssetsHandler` |
 
-### 3.3 SQLite schema — 9 tables, exact DDL shape
+### 3.3 SQLite schema — 10 tables, exact DDL shape
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `flow_aggregate` | `id` PK, `tenant_id`, `cluster_id`, `reported_at`, `src_workload`, `dst_workload_or_endpoint`, `path_class`, `confidence`, `bytes_tx`, `bytes_rx`, `cost_low_inr`, `cost_high_inr`, `fix_hint`, `fix_manifest`, `cloud`, `region`, **`savings_low_inr`, `savings_high_inr`** (new) | Index on `(cluster_id, reported_at)`. Never pruned — every snapshot ever ingested is retained. |
+| `flow_aggregate` | `id` PK, `tenant_id`, `cluster_id`, `reported_at`, `src_workload`, `dst_workload_or_endpoint`, `path_class`, `confidence`, `bytes_tx`, `bytes_rx`, `cost_low_inr`, `cost_high_inr`, `fix_hint`, `fix_manifest`, `cloud`, `region`, `savings_low_inr`, `savings_high_inr` | Index on `(cluster_id, reported_at)`. Raw rows older than the retention window (default 30 real days) are now folded into `flow_aggregate_daily` and deleted by a real background compactor — see §3.18. No longer unboundedly retained by design. |
+| `flow_aggregate_daily` **(new)** | `id` PK, `tenant_id`, `cluster_id`, `day`, `src_workload`, `dst_workload_or_endpoint`, `path_class`, `bytes_tx`, `bytes_rx`, `cost_low_inr`, `cost_high_inr`, `savings_low_inr`, `savings_high_inr`, `sample_count` | Unique on `(tenant_id, cluster_id, day, src_workload, dst_workload_or_endpoint, path_class)`. The real cold-tier rollup §3.18's compactor writes into — one row per real day instead of one per real ingest cycle. `sample_count` records how many raw rows were folded in, for honest transparency about granularity lost. |
 | `settings` | `(tenant_id, key)` composite PK, `value` | Rebuilt mid-session from a single-column `key` PK — see bug #6 below. |
 | `tenants` | `id` PK, `name`, `created_at` | |
 | `users` | `id` PK, `tenant_id` FK, `username` UNIQUE, `password_hash` (bcrypt), `role`, `created_at` | |
@@ -270,7 +270,7 @@ column name" errors swallowed) except the `settings` table rebuild,
 which detects the old schema via `sqlite_master.sql` and does a real
 `CREATE new → INSERT SELECT → DROP → RENAME` inside one transaction.
 
-### 3.4 Control plane file-by-file (33 files)
+### 3.4 Control plane file-by-file (35 files)
 
 | File | Role |
 |---|---|
@@ -287,7 +287,7 @@ which detects the old schema via `sqlite_master.sql` and does a real
 | `team.go` | `TeamOwnership` CRUD, `extractNamespace()` (RFC-1123-label regex), `computeSpendByTeam()` (pure grouping function). |
 | `team_api.go` | `handleTeams` — GET (any role) / POST+DELETE (admin only via `teamsRoute`). |
 | `deployevent.go` | `IngestDeployEvents()`, `RecentDeployEvents(tenantID, clusterID, since, until)`. |
-| `workloadgrowth.go` | `WorkloadCostGrowth(tenantID, topN)` — ranks workloads by real first→last-snapshot delta across full retained history; correlates each with `RecentDeployEvents` in its own namespace over its own trend window. |
+| `workloadgrowth.go` | `WorkloadCostGrowth(tenantID, topN)` — ranks workloads by real first→last-snapshot delta across full retained history (now `UNION ALL`s `flow_aggregate` with `flow_aggregate_daily`, §3.18, so compaction can't quietly shift what "first appearance" means); correlates each with `RecentDeployEvents` in its own namespace over its own trend window. |
 | `workloadgrowth_api.go` | `handleWorkloadGrowth` — its own route, not folded into dashboard-summary (scans full history, not just latest-per-cluster). |
 | `webassets.go` | `go:embed`'s `web/dist`, serves the SPA + static assets, no auth. |
 | `supabase_auth.go` | `SupabaseAuthenticator.VerifyToken` — real `GET /auth/v1/user` call, not local JWKS verification. |
@@ -307,6 +307,8 @@ which detects the old schema via `sqlite_master.sql` and does a real
 | `remediation_api.go` | `handleRemediationPreview` — `GET /api/v1/remediation/preview`. |
 | `placement.go` **(new)** | `buildPlacementGraph`, `OptimizePlacement` — real Kernighan-Lin graph partitioning with multi-restart (§3.17). |
 | `placement_api.go` **(new)** | `handlePlacementPreview` — `GET /api/v1/placement/preview?groups=N`. |
+| `compaction.go` **(new)** | `CompactFindingsOlderThan` (real day-bucketed rollup + atomic delete), `StartCompactionLoop` (background ticker) — the real retention/compaction fix, §3.18. |
+| `outcome_stats.go` **(new)** | `OutcomeDatasetStats` — real shown/applied/measured counts + mean prediction error over `ListRecommendationOutcomes`, §3.19. |
 
 ### 3.5 Control plane dependencies (`go.mod`, exact versions)
 
@@ -317,7 +319,7 @@ own transitive requirements (libc, mathutil, memory, bigfft, etc.) plus
 dependencies — it's a plain `net/http` client against Groq's
 OpenAI-compatible REST API, not an SDK.
 
-### 3.6 Control plane test inventory — 154 test functions across 24 files
+### 3.6 Control plane test inventory — 167 test functions across 26 files
 
 | File | Approx. tests | Covers |
 |---|---|---|
@@ -333,12 +335,14 @@ OpenAI-compatible REST API, not an SDK.
 | `supabase_auth_test.go` | 5 | Token verification against a fake Supabase server, bearer-vs-cookie fallback, provision-exactly-once |
 | `invite_test.go` + `invite_api_test.go` | 14 | Upsert-replace semantics, role validation, revoke, join-via-invite, tenant isolation, admin-only-including-GET |
 | `outcome_test.go` + `outcome_api_test.go` | 14 | Shown/freeze-on-applied upsert, idempotent apply, real cost-after measurement (both "fixed" and "flow gone" cases), tenant isolation |
+| `outcome_stats_test.go` + additions to `outcome_api_test.go` **(new)** | 6 | All-zero honest state with no data, shown-without-applied leaves the mean prediction error `nil` (not fabricated 0), a real computed mean prediction error against a known predicted-vs-actual gap, tenant isolation at both the store and API layer |
 | `chat_test.go` | 12 | Groq client against a fake server, the tool-calling loop (success/unknown-tool/max-rounds/retry), tenant-scoped tool isolation, `parseLenientInt`, the full HTTP handler |
 | `anomaly_narrator_test.go` | 6 | Prompt grounding (with/without a real likely cause), 503/404/tenant-isolation at the API layer |
 | `forecast_test.go` | 11 | Synthetic linear series picks plain Holt / synthetic plateauing series picks damped Holt (both asserted via real measured MAE), honest zero-fold fallback with too little history, damped-never-exceeds-undamped invariant, a real wall-clock budget at 4,200-point production scale, API layer (400/tenant-isolation/end-to-end) |
 | `summary_test.go` | 5 | Pure Go aggregation functions cross-checked against the same fixtures/expected values as the original SQL-based `Summary`/`SpendByClass`/`SpendByCloud` tests in `store_test.go` |
 | `remediation_test.go` + `remediation_api_test.go` | 9 | Each qualifying/disqualifying policy reason checked individually, a real no-mutation guarantee, API-layer tenant isolation |
-| `placement_test.go` + `placement_api_test.go` **(new)** | 15 | Synthetic graphs with analytically-known-correct answers (disconnected pairs, a triangle, a 4-workload/2-pair case proving the algorithm finds the mathematically best co-location, not just *a* local optimum), a real wall-clock budget at 100-workload scale, API layer |
+| `placement_test.go` + `placement_api_test.go` | 15 | Synthetic graphs with analytically-known-correct answers (disconnected pairs, a triangle, a 4-workload/2-pair case proving the algorithm finds the mathematically best co-location, not just *a* local optimum), a real wall-clock budget at 100-workload scale, API layer |
+| `compaction_test.go` **(new)** | 8 | Real sum/`sample_count` correctness folding multiple raw rows into one rollup, recent rows left untouched, idempotent re-run over already-compacted data, separate real calendar days never merged, tenant isolation, the `WorkloadCostGrowth`-survives-compaction integration test, a real no-op guard when nothing is old enough yet |
 
 Two new tests in `store_test.go` guard the WAL/connection-pool change
 specifically: `TestOpenStoreConnectionsShareRealDataAgainstAFile` (8 real
@@ -346,10 +350,10 @@ concurrent connections against a real file all see the same real
 ingested row) and the `:memory:`-stays-single-connection guard baked
 into `OpenStore` itself.
 
-Run: `cd controlplane && go test ./...` — **all 154 passing** (re-verified
-2026-08-02), ~13–34s wall time depending on cache (several tests use
-real 1.1s sleeps to get distinct `reported_at` second-granularity
-timestamps).
+Run: `cd controlplane && go test ./...` — **all 167 passing** (re-verified
+2026-08-02, `go test -race` clean), ~150-170s wall time under `-race`
+depending on cache (several tests use real 1.1s sleeps to get distinct
+`reported_at` second-granularity timestamps).
 
 ### 3.7 New this session: six items from an external roadmap review, built for real
 
@@ -830,11 +834,122 @@ twice — the second pass is what caught the order-dependency bug, then
 re-verified the rewritten algorithm live afterward. E2E suite extended
 and green (21/21).
 
+### 3.18 Real automated retention/compaction for `flow_aggregate` (`compaction.go`)
+
+Direct response to a real, explicit ask: swap the SQLite backend for a
+high-throughput time-series engine (e.g. ClickHouse), or implement
+automated retention/compaction. Chose compaction, deliberately, not the
+storage-engine swap — checked against this project's actual real scale
+before deciding, not by default: one real tenant, SQLite+WAL already
+fixed in §3.15 to genuinely handle millions of rows fine, and every
+dashboard query that reads `flow_aggregate` other than
+`WorkloadCostGrowth` only ever wants the latest snapshot per cluster or
+an already-bounded recent window (checked directly against every
+`FROM flow_aggregate` call site in `store.go`/`outcome.go`/
+`forecast_api.go`, not assumed). A full storage-engine migration would
+touch every one of those queries and the deployment topology for a
+problem this solves directly — real, costly over-engineering for the
+data volume that actually exists.
+
+**How it works**: `CompactFindingsOlderThan(cutoff)` groups every raw row
+reported before `cutoff` by real calendar day (UTC, `(reported_at /
+86400) * 86400`), tenant, cluster, and workload pair, sums bytes/cost/
+savings into `flow_aggregate_daily`, then deletes the raw rows just
+folded in — all inside one transaction, rollup insert before raw delete,
+so a crash partway through can never lose data without its aggregate
+already durably written. `StartCompactionLoop` runs this once
+immediately then on an hourly tick, logged, non-fatal on error (retries
+next tick). `CHIDRIXX_RAW_RETENTION_DAYS` (default 30) lets an operator
+tune the window without a rebuild.
+
+**The one query this couldn't leave alone**: `WorkloadCostGrowth` ranks
+workloads by cost change between "first ever appearance" and "most
+recent" — if compaction silently deleted the raw row behind a workload's
+first appearance, that delta would quietly drift forward every time old
+data aged out, changing what "growth over full retained history"
+honestly means without anyone asking for that. Fixed by `UNION ALL`ing
+`flow_aggregate` with `flow_aggregate_daily` in that one query — proven,
+not assumed, by a real integration test
+(`TestWorkloadCostGrowthSurvivesCompactionOfItsFirstSnapshot`: ingest a
+workload's first snapshot, compact it away, confirm the real 190-INR
+delta is unchanged afterward, now sourced from the rollup).
+
+**Verified against real production-scale data, not just synthetic
+fixtures**: pulled a fresh copy of the live cluster's actual database
+(2,369,010 real rows at pull time) and ran the exact real compaction SQL
+against it directly (rolled back afterward — a read/verify pass, never
+applied to the throwaway copy's own state or the live database). Result:
+2,205,218 real raw rows folded into exactly 1,998 real daily rollups (a
+**1,103x** real row-count reduction for the compacted slice), with a
+real cost-conservation check (`remaining raw cost + rolled-up cost` had
+to equal the pre-compaction total) passing exactly. `PRAGMA
+integrity_check` on the copy: `ok`.
+
+**Deliberately did not force a demonstration compaction against the live
+database itself**: the live cluster's real retained history (~55 hours)
+is nowhere near the 30-day default retention window, so deploying this
+correctly compacts *nothing* yet on the real system — confirmed live via
+the pod's own log line (`automated compaction enabled: raw
+flow_aggregate rows older than 720h0m0s...`, no `folded N raw row(s)`
+line, exactly as it should behave with fresh data). Lowering retention
+just to force a visible live demo would have meant real, avoidable
+downsampling of the only production dataset that exists, for a
+correctness claim already proven rigorously against a real copy above —
+not worth the risk for a demo.
+
+8 new Go tests (`compaction_test.go`), full suite green (167 tests, `go
+test -race` clean). Full Go build + `docker build` + `k3d image import`
++ `kubectl rollout restart`, re-verified live: `dashboard-summary` and
+`workload-growth` both still return real correct data post-deploy
+(~3.8s, consistent with §3.15, not regressed).
+
+### 3.19 Real outcome-dataset-health visibility (`outcome_stats.go`)
+
+Direct response to the second half of the same ask: get real operators
+actively applying recommendations so `recommendation_outcomes` matures
+into a dataset worth fine-tuning on. Being honest about what this
+actually is: **not a code task**. No endpoint, model, or UI can
+manufacture real operators applying real fixes over real time — §9
+already said this plainly, and nothing here changes that underlying real
+gap (still genuinely 0 real applied/measured rows on the live cluster,
+confirmed directly — see below). What *is* buildable, and what this
+ships, is honest visibility into that real gap, so progress toward it is
+trackable instead of invisible the moment real usage starts.
+
+`OutcomeDatasetStats(tenantID)` aggregates `ListRecommendationOutcomes`
+(already-existing, already measures any newly-measurable pending
+outcomes) in pure Go — real shown/applied/measured counts, plus
+`MeanAbsPredictionErrorINR`: the real average gap between a fix's
+predicted savings and what actually happened
+(`cost_before_inr - cost_after_inr`) for outcomes that have real
+measured data. A pointer, not a bare `0`, when nothing is measured yet —
+reporting `0` there would dishonestly read as "predictions are perfect"
+instead of "nothing to measure yet." `GET /api/v1/outcomes/stats`
+exposes it; a new "Outcome dataset health" section on the Automations
+page (natural home — already the closed-loop-remediation story) renders
+the three real counts plus an explicit, honest empty state
+("No recommendations marked applied yet — this is expected before real
+operators are actively using the product") when nothing has been applied.
+
+Verified live against the real running cluster, not just fixtures:
+`GET /api/v1/outcomes/stats` returns `{"total_shown":26,
+"total_applied":0,"total_measured":0}` — the real, current state of this
+lab environment's dataset, screenshotted rendering correctly on the
+actual live Automations page. This is the honest baseline the ask was
+about: a real, non-fabricated 26 recommendations captured, 0 real
+operator applications yet, because this environment doesn't have real
+operators using it day-to-day yet — exactly the gap §9 already named.
+
+6 new Go tests (`outcome_stats_test.go` + 2 additions to
+`outcome_api_test.go`), full suite green. 1 new E2E test asserting the
+real shown/applied/measured counts and the honest empty state
+(22/22 E2E, up from 21/21).
+
 ---
 
 ## 4. Frontend — component inventory
 
-36 `.tsx` files + 10 `.ts` files (excluding `.d.ts`), 5,061 lines in
+36 `.tsx` files + 10 `.ts` files (excluding `.d.ts`), 5,137 lines in
 `src/` — re-counted directly against the tree, not carried forward from
 an earlier session's number. Separately, `e2e/` holds 10 more `.ts`
 files (the committed Playwright suite, §3.10 — a distinct concern from
@@ -871,12 +986,13 @@ Anomalies, History, Reports, Automations, Settings.
 ### 4.3 Frontend build output (measured, current — rebuilt as part of this update)
 
 ```
-dist/assets/index-*.js               1,118.04 kB  (329.24 kB gzip)
-dist/assets/index-*.css                 20.12 kB  (5.47 kB gzip)
-dist/assets/FeaturePages-*.js             8.58 kB  (3.08 kB gzip)
-dist/assets/TeamsPage-*.js                7.83 kB  (2.09 kB gzip)
-dist/assets/CostGraphPage-*.js            5.88 kB  (2.42 kB gzip)
-+ 8 more page chunks, 1.5-4kB each
+dist/assets/index-*.js               1,118.04 kB  (328.14 kB gzip)
+dist/assets/index-*.css                 20.20 kB  (5.47 kB gzip)
+dist/assets/AutomationsPage-*.js          9.02 kB  (2.53 kB gzip)
+dist/assets/CostGraphPage-*.js            9.16 kB  (3.28 kB gzip)
+dist/assets/FeaturePages-*.js             8.58 kB  (3.10 kB gzip)
+dist/assets/TeamsPage-*.js                7.83 kB  (2.10 kB gzip)
++ 7 more page chunks, 1.5-4kB each
 ```
 
 Code-split (§8, closed): only Overview + Sidebar ship in the main
@@ -930,34 +1046,41 @@ fields), `templates/deployment.yaml` (`CHIDRIXX_ADMIN_USER`/
 ingest token + the `create-tenant`/`create-user`/`create-token` exec
 commands), `templates/_helpers.tpl`.
 
-### 5.2 Live cluster state (k3d, as of this document — re-verified 2026-08-02 post-performance-fix)
+### 5.2 Live cluster state (k3d, as of this document — re-verified 2026-08-03 post-retention/compaction)
 
 - Namespace `chidrixx`: `chidrixx-controlplane` Deployment (Helm
   revision **8**), image `chidrixx-controlplane:dev` (rebuilt and
-  `k3d image import`ed several times today — no registry push needed
-  for local iteration), PVC-backed SQLite, `GROQ_API_KEY` wired via the
-  `chidrixx-controlplane-groq-key` secret (§3.11).
+  `k3d image import`ed again today for §3.18/§3.19 — no registry push
+  needed for local iteration), PVC-backed SQLite, `GROQ_API_KEY` wired
+  via the `chidrixx-controlplane-groq-key` secret (§3.11).
 - Namespace `kharcha`: `kharcha-kharcha` DaemonSet (Helm revision 5,
   unchanged today), image `chidrixx-agent:dev`, real ingest token issued
   via `create-token` and stored in the `kharcha-controlplane-token`
   secret.
 - **Real production data, directly queried from a pulled+integrity-
   checked copy of the live database, not estimated**: `flow_aggregate`
-  has **2,229,443 real rows** (never pruned, by design — see §3.3 and
-  §3.15's performance investigation, triggered by this exact growth).
-  `chidrixx-lab` has 5,591 distinct real snapshots spanning ~53 hours
-  (~2.2 days) of continuous real ingestion; `chidrixx-lab-2` has stayed
-  at 5 snapshots since early in the session (its test agent was never
-  kept running long-term — an idle fixture, not a bug). 1 real tenant,
-  2 real admin users. 24 rows in `recommendation_outcomes` (§3.10) from
-  real dashboard loads. `journal_mode` confirmed `wal` on the live file
-  (`PRAGMA journal_mode` queried directly against the pulled copy).
-  Real `spend_by_team` still shows `Unassigned` (no namespace mappings
+  has **2,391,057 real rows** (up from 2,229,443 earlier this session —
+  continuous real ingestion, not paused). `chidrixx-lab` and
+  `chidrixx-lab-2` together span ~55h40m of real continuous ingestion.
+  `flow_aggregate_daily` (§3.18) is correctly **0 rows** on the live
+  system — the default 30-day retention window is far longer than this
+  cluster's real ~2.3-day history, so the live background compactor
+  correctly compacts nothing yet (confirmed via the pod's own log line,
+  not assumed); the compaction logic itself was verified separately
+  against a real pulled copy with a tightened window (§3.18: 2,205,218
+  real rows → 1,998 real rollups, cost-conserving). 1 real tenant, 2
+  real admin users. **26 rows** in `recommendation_outcomes` (up from
+  24), of which **0 are applied and 0 are measured** — the real,
+  unfabricated current state of §3.19's outcome-dataset-health metric,
+  because this lab environment has no real day-to-day operators using
+  it yet. `journal_mode` confirmed `wal` on the live file. Real
+  `spend_by_team` still shows `Unassigned` (no namespace mappings
   configured on the live tenant yet) — a real gap in configuration, not
   a bug.
-- The live database file itself is ~550MB (main file) + a few MB of
+- The live database file itself is ~590MB (main file) + a few MB of
   WAL — consistent with real, continuous ingestion over multiple days,
-  not a synthetic fixture.
+  not a synthetic fixture. This will stop growing unboundedly once real
+  data starts crossing the 30-day retention window (§3.18).
 
 ---
 
@@ -1024,12 +1147,17 @@ labeled, never filled with invented numbers:
   (checked directly, not assumed — see §3.14/§3.15).
 - **No automated release/versioning** — both charts are still `0.1.0`;
   there's no CI job that bumps versions or cuts releases automatically.
-- **A covering index or retention pruning for `flow_aggregate`** — the
-  table is never pruned by design and now has 2.2M+ real rows (§3.15,
-  §5.2); the performance fix reduced redundant work per request but
-  didn't add either of these, since both are bigger decisions (a schema
-  migration; a real data-retention policy) than the bug fix that
-  prompted looking at this at all.
+- **A covering index for `flow_aggregate`** — retention/compaction now
+  exists (§3.18, closing the other half of this former gap), but a
+  covering index for the residual latest-per-cluster queries wasn't
+  added; not needed yet at this data volume, and a real, separate call
+  if the compacted table's query patterns ever need it.
+- **A ClickHouse (or similar) storage-engine swap** — deliberately not
+  done; see §3.18 for the real reasoning (SQLite+WAL already handles
+  this project's actual real scale fine; a full swap would be costly
+  over-engineering for a problem retention/compaction solves directly).
+  Revisit only if a real second engine's cost is actually justified by
+  real multi-tenant scale this environment doesn't have yet.
 
 ---
 
@@ -1073,11 +1201,15 @@ above.
   the predicted amount — which is a genuinely proprietary dataset no
   competitor can replicate (needs chidrixx's own byte-level telemetry).
   §3.11's `recommendation_outcomes` table is that data layer, shipped
-  this session specifically to start capturing it. The honest gap: there
-  are zero real rows of "recommendation → real operator outcome" in it
-  yet from actual production usage — this needs real customers using the
-  product for a real period of time before there's anything to train on.
-  Revisit once that data actually exists.
+  this session specifically to start capturing it. §3.19 added real,
+  honest visibility into how mature it actually is (`GET
+  /api/v1/outcomes/stats`, an "Outcome dataset health" card on
+  Automations) — but visibility isn't the same as progress: the real gap
+  is unchanged by that. Directly confirmed against the live cluster
+  while building §3.19: **26 real rows shown, 0 applied, 0 measured**.
+  This needs real operators actually applying real recommendations over
+  real time; no feature can shortcut that, only make it trackable once
+  it starts happening. Revisit once that data actually exists.
 - **A deeper domain-specialized model remains a real, undated
   possibility** if Groq's off-the-shelf model proves insufficient for
   more advanced reasoning (e.g. multi-hop causal simulation over the
@@ -1144,14 +1276,17 @@ across component comments:
   decision** (India's GCP billing deposit requirement), not a technical
   gap — see §8 item 1. Deliberately not pushed through for a demo.
 - **The chat assistant has no proprietary *outcome* data to fine-tune on
-  yet** — §3.11's `recommendation_outcomes` table is live and real (24
+  yet** — §3.11's `recommendation_outcomes` table is live and real (26
   real rows from real dashboard loads on the live cluster, verified by
   direct query against a pulled copy of the production database), but
-  0 of those 24 have `applied_at` set — no operator has clicked "Mark as
+  0 of those 26 have `applied_at` set — no operator has clicked "Mark as
   applied" on the live cluster yet, so the "did this fix actually work"
   signal the whole feature exists to eventually train on is still
   empty. The *shown* tracking works; the *outcome* dataset doesn't
-  exist yet. See §9.
+  exist yet. §3.19 added a real `GET /api/v1/outcomes/stats` endpoint
+  and dashboard card making this exact gap honestly visible (rather
+  than only discoverable by pulling a database copy) — the gap itself
+  is unchanged by that. See §9.
 
 ---
 
@@ -1192,7 +1327,16 @@ of the feature. The placement simulator (§3.17) is the equally safe
 first step of the other big idea (a cost-aware placement algorithm) —
 a real graph-partitioning algorithm with two real bugs caught and fixed
 by actually testing and screenshotting it, not a black box trusted on
-faith.
+faith. Real automated retention/compaction (§3.18) closes
+`flow_aggregate`'s unbounded-growth risk — chosen over a ClickHouse swap
+after actually checking this project's real scale first, not by
+default, and verified against a real 2.37M-row copy of the live
+database (1,103x real row reduction on the compacted slice, cost-
+conserving) before ever touching the live system. Real outcome-dataset-
+health visibility (§3.19) makes the recommendation-outcomes dataset's
+actual maturity trackable — honestly still 26 shown/0 applied/0 measured
+on the live cluster, because that gap needs real operators over real
+time, not more code.
 
 What's genuinely left, in priority order (§8): a real second-cloud agent
 deployment is blocked on a real, non-technical wall (India's GCP billing
@@ -1203,4 +1347,5 @@ assistant, the anomaly narrator, the deeper forecasting model) are
 deliberately sequenced — the data layer first, then models grounded
 against real data volume/history — with the honest data gap named
 directly in §9's future-vision section: there's no proprietary outcome
-dataset yet, only the schema now capturing it going forward.
+dataset yet, only the schema (and now, §3.19's visibility into it)
+capturing progress toward one as real usage actually happens.

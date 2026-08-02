@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import type { DashboardSummary, RemediationDecision } from "../types";
+import type { DashboardSummary, OutcomeDatasetStats, RemediationDecision } from "../types";
 import { PATH_CLASS_LABEL } from "../palette";
 import { formatINR } from "../format";
 import { IconDownload } from "../icons";
@@ -42,7 +42,86 @@ export function AutomationsPage({ data }: { data: DashboardSummary }) {
       )}
 
       <RemediationPreview />
+      <OutcomeDatasetHealth />
     </motion.div>
+  );
+}
+
+// OutcomeDatasetHealth makes real progress toward "a dataset worthy of
+// fine-tuning a custom model" (see PROJECT_STATUS.md) visible and
+// trackable -- honestly, not fabricated. That goal depends entirely on
+// real operators actually applying real recommendations over real time;
+// no endpoint can manufacture that, so this only ever reports what has
+// genuinely happened so far, including the honest "nothing applied yet"
+// state.
+function OutcomeDatasetHealth() {
+  const [stats, setStats] = useState<OutcomeDatasetStats | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch("/api/v1/outcomes/stats")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((d: OutcomeDatasetStats) => !cancelled && setStats(d))
+      .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <div className="mt-2 flex flex-col gap-3">
+      <div>
+        <h3 className="text-sm font-semibold">Outcome dataset health</h3>
+        <p className="mt-1 max-w-2xl text-xs text-[var(--ink-muted)]">
+          This dataset only matures with real operator usage over real time — recommendations
+          actually applied, then their real cost impact measured against what was predicted. No
+          feature can shortcut that; this just makes the real, current progress visible.
+        </p>
+      </div>
+
+      {error && (
+        <div className="rounded-xl border border-[var(--status-critical)]/40 bg-[var(--status-critical)]/10 px-4 py-3 text-sm text-[var(--status-critical)]">
+          Couldn't load outcome dataset stats: {error}
+        </div>
+      )}
+
+      {stats && (
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 shadow-[var(--card-shadow)]">
+            <div className="text-[0.65rem] text-[var(--ink-muted)]">Recommendations shown</div>
+            <div className="font-mono text-lg tabular-nums">{stats.total_shown}</div>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 shadow-[var(--card-shadow)]">
+            <div className="text-[0.65rem] text-[var(--ink-muted)]">Marked applied</div>
+            <div className="font-mono text-lg tabular-nums">{stats.total_applied}</div>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 shadow-[var(--card-shadow)]">
+            <div className="text-[0.65rem] text-[var(--ink-muted)]">Measured outcomes</div>
+            <div className="font-mono text-lg tabular-nums">{stats.total_measured}</div>
+          </div>
+        </div>
+      )}
+
+      {stats && stats.total_measured > 0 && stats.mean_abs_prediction_error_inr !== undefined && (
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--page)] px-3 py-2 text-xs text-[var(--ink-secondary)]">
+          Real mean prediction error across {stats.total_measured} measured outcome
+          {stats.total_measured === 1 ? "" : "s"}:{" "}
+          <span className="font-mono tabular-nums text-[var(--ink)]">
+            {formatINR(stats.mean_abs_prediction_error_inr)}
+          </span>{" "}
+          (predicted savings vs. what actually happened).
+        </div>
+      )}
+
+      {stats && stats.total_applied === 0 && (
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--page)] px-3 py-2 text-xs text-[var(--ink-muted)]">
+          No recommendations marked applied yet — this is expected before real operators are
+          actively using the product. Mark a real fix as applied on Overview once you act on it, to
+          start growing this dataset.
+        </div>
+      )}
+    </div>
   );
 }
 

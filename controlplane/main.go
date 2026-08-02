@@ -9,6 +9,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"time"
 )
 
 func main() {
@@ -88,6 +90,7 @@ func main() {
 	api.HandleFunc("/api/v1/workload-growth", requireSession(store, supabaseAuth, handleWorkloadGrowth(store)))
 	api.HandleFunc("/api/v1/outcomes", requireSession(store, supabaseAuth, handleOutcomes(store)))
 	api.HandleFunc("/api/v1/outcomes/apply", requireSession(store, supabaseAuth, handleMarkOutcomeApplied(store)))
+	api.HandleFunc("/api/v1/outcomes/stats", requireSession(store, supabaseAuth, handleOutcomeStats(store)))
 	api.HandleFunc("/api/v1/chat", requireSession(store, supabaseAuth, handleChat(store, groq)))
 	api.HandleFunc("/api/v1/anomalies/narrate", requireSession(store, supabaseAuth, handleNarrateAnomaly(store, groq)))
 	api.HandleFunc("/api/v1/forecast", requireSession(store, supabaseAuth, handleForecast(store)))
@@ -100,6 +103,25 @@ func main() {
 	mux.HandleFunc("/api/v1/auth/logout", handleLogout(store))
 	mux.Handle("/api/", api)
 	mux.Handle("/", webAssetsHandler())
+
+	// Real automated retention/compaction (see compaction.go): bounds
+	// flow_aggregate's real measured unbounded growth by folding raw rows
+	// older than the retention window into daily rollups on a recurring
+	// background loop, since this control plane runs as one long-lived
+	// server process with no separate cron/worker deployment to hand
+	// periodic jobs to instead. CHIDRIXX_RAW_RETENTION_DAYS lets an
+	// operator tune the window (e.g. tighter on a storage-constrained
+	// host) without a rebuild; unset keeps the generous 30-day default.
+	retention := DefaultRawRetention
+	if days := os.Getenv("CHIDRIXX_RAW_RETENTION_DAYS"); days != "" {
+		if n, err := strconv.Atoi(days); err == nil && n > 0 {
+			retention = time.Duration(n) * 24 * time.Hour
+		} else {
+			log.Printf("CHIDRIXX_RAW_RETENTION_DAYS=%q is not a positive integer, keeping the default retention of %s", days, DefaultRawRetention)
+		}
+	}
+	go store.StartCompactionLoop(retention, time.Hour, make(chan struct{}), log.Printf)
+	log.Printf("automated compaction enabled: raw flow_aggregate rows older than %s are folded into daily rollups every hour", retention)
 
 	log.Printf("chidrixx control plane listening on %s (store: %s)", *addr, *dbPath)
 	log.Fatal(http.ListenAndServe(*addr, mux))

@@ -88,6 +88,37 @@ func handleOutcomes(store *Store) http.HandlerFunc {
 	}
 }
 
+// handleOutcomeStats exposes the real, aggregate maturity of one tenant's
+// outcome dataset -- how many recommendations have real applied/measured
+// data behind them, and how accurate the predictions have been where
+// that's measurable. This is the honest visibility piece behind "get real
+// operators actively applying recommendations so this dataset matures":
+// that goal is about real usage over real time, not something an API
+// endpoint can manufacture, but this makes real progress toward it
+// trackable instead of invisible.
+func handleOutcomeStats(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		tenantID, ok := tenantIDFromContext(r.Context())
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		stats, err := store.OutcomeDatasetStats(tenantID)
+		if err != nil {
+			log.Printf("outcomes: stats: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(stats)
+	}
+}
+
 // handleMarkOutcomeApplied is a separate route (rather than a method on
 // handleOutcomes) so it can require the finding's full identity in the
 // body, not a query param, matching the identity the outcomes table is
