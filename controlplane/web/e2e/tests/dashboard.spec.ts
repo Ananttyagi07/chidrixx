@@ -69,6 +69,30 @@ test("Automations' remediation preview shows a real would-apply and a real would
   );
 });
 
+test("Cost Graph's placement simulator shows a real computed result, including the honest zero-savings case", async ({ page }) => {
+  await page.goto("/");
+  await page.getByText("Cost Graph").click();
+  await expect(page.getByText("Placement simulator")).toBeVisible({ timeout: 10_000 });
+
+  // globalSetup's real fixture has exactly 1 real CROSS_AZ edge (checkout
+  // <-> redis, 2 real workloads). With the default "3 zones" (a real
+  // redundancy requirement, not a bucket count -- see placement.go),
+  // both workloads are forced into separate zones and the honest answer
+  // is 0 potential savings, not a bug -- proven directly at the Go level
+  // in TestOptimizePlacementWithFewerWorkloadsThanGroupsForcesEachAlone.
+  await expect(page.getByText("₹40").first()).toBeVisible({ timeout: 10_000 });
+
+  const res = await page.request.get("/api/v1/placement/preview?groups=3");
+  const body = await res.json();
+  expect(body).toMatchObject({
+    groups: 3,
+    workloads: 2,
+    edges: 1,
+    observed_cross_zone_inr: 40,
+    potential_savings_inr: 0,
+  });
+});
+
 test("marking a real fix applied on Overview is tracked server-side, not just a UI toggle", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("checkout").first()).toBeVisible({ timeout: 10_000 });
