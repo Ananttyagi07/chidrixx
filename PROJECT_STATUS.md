@@ -1,6 +1,6 @@
 # chidrixx — Project & Technical Status (Universal Reference)
 
-_Last updated: 2026-08-02 (merged narrative + engineering reference into one file)_
+_Last updated: 2026-08-02 (real Supabase auth, self-service team invites, and a committed Playwright E2E suite)_
 
 This is the single, complete picture of chidrixx: what's real and
 verified, what's explicitly not built (and why), what's actually left to
@@ -9,10 +9,11 @@ underneath every claim: which file, which function, which DB column,
 which test, which command proved it. Nothing here is recalled from
 memory; every number was measured against the actual repository at the
 commit this file was last updated against (`git log -1` at write time:
-`d43cf10`, "docs: add TECHNICAL_STATUS.md"), by running `go build`,
-`go test`, `gofmt -l`, `find`/`wc`/`grep`, `helm lint`/`template`, and
-live Playwright/curl passes against a real k3d cluster — not written and
-assumed to work.
+`787f7dd`, "controlplane/web: real Playwright E2E suite + fix a real
+logout bug it caught"), by running `go build`, `go test`, `gofmt -l`,
+`find`/`wc`/`grep`, `helm lint`/`template`, and live Playwright/curl
+passes against both a real k3d cluster and a real running
+`controlplane` server — not written and assumed to work.
 
 ---
 
@@ -217,6 +218,7 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
 | `/api/v1/dashboard-summary` | GET | `requireSession` | `handleDashboardSummary` |
 | `/api/v1/budget` | GET / POST | `requireSession` (POST also `requireAdmin`) | `budgetRoute` |
 | `/api/v1/teams` | GET / POST / DELETE | `requireSession` (POST+DELETE also `requireAdmin`) | `teamsRoute` |
+| `/api/v1/invites` | GET / POST / DELETE | `requireSession` + `requireAdmin` (all methods, including GET) | `handleInvites` |
 | `/api/v1/workload-growth` | GET | `requireSession` | `handleWorkloadGrowth` |
 | `/api/v1/auth/me` | GET | `requireSession` | `handleMe` |
 | `/api/v1/auth/login` | POST | none (that's the point) | `handleLogin` |
@@ -233,8 +235,16 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
 | `users` | `id` PK, `tenant_id` FK, `username` UNIQUE, `password_hash` (bcrypt), `role`, `created_at` | |
 | `api_tokens` | `id` PK, `tenant_id` FK, `token_hash` UNIQUE (SHA-256), `label`, `created_at` | Plaintext token is never stored, only ever shown once at creation. |
 | `sessions` | `id` PK (opaque random, doubles as cookie value), `user_id` FK, `tenant_id` FK, `created_at`, `expires_at` | Server-tracked — `DELETE`-revocable, unlike a stateless JWT. |
-| `team_ownership` **(new)** | `(tenant_id, namespace)` composite PK, `team`, `created_at` | |
-| `deploy_event` **(new)** | `id` PK, `tenant_id`, `cluster_id`, `namespace`, `name`, `reason`, `message`, `occurred_at` | Index on `(tenant_id, cluster_id, occurred_at)`. |
+| `team_ownership` | `(tenant_id, namespace)` composite PK, `team`, `created_at` | |
+| `deploy_event` | `id` PK, `tenant_id`, `cluster_id`, `namespace`, `name`, `reason`, `message`, `occurred_at` | Index on `(tenant_id, cluster_id, occurred_at)`. |
+| `invites` **(new)** | `id` PK, `tenant_id` FK, `email` UNIQUE, `role`, `created_at` | Upserted by email (`ON CONFLICT(email) DO UPDATE`); deleted atomically on acceptance (`AcceptInvite`). |
+
+`users` also gained a `supabase_user_id TEXT` column **(new)**, nullable
+(empty for CLI-provisioned accounts, which keep using
+`password_hash`/bcrypt), with a partial unique index
+(`idx_users_supabase_user_id ... WHERE supabase_user_id IS NOT NULL`) —
+SQLite's `ALTER TABLE ADD COLUMN` can't declare `UNIQUE` directly, so the
+uniqueness is enforced via the index instead.
 
 Migrations are all `ALTER TABLE ... ADD COLUMN` (idempotent, "duplicate
 column name" errors swallowed) except the `settings` table rebuild,
@@ -403,6 +413,70 @@ everything else in this document.
    subcommand, then using it to issue a real replacement and confirming
    ingest succeeded again.
 
+### 3.9 Real Supabase-backed signup/login + self-service team invites
+
+Additive to the existing cookie/CLI auth (§3.1) — self-hosted,
+CLI-provisioned tenants keep working unchanged, since `requireSession`
+now checks for a Supabase `Authorization: Bearer` header first and falls
+back to the legacy cookie path when there isn't one.
+
+- **Supabase auth.** `supabase_auth.go`'s `SupabaseAuthenticator`
+  verifies a token by calling the real `GET /auth/v1/user` against the
+  live project (`jccydmmygpfdkufkswcw.supabase.co`) — not local JWKS
+  verification, a deliberate simplicity/correctness tradeoff. On first
+  login with a new Supabase identity, `ResolveOrProvisionSupabaseUser`
+  either joins a pending invite (below) or calls
+  `ProvisionTenantForSupabaseUser` to atomically create a brand-new
+  tenant + admin user + ingest token — i.e. **Supabase login is now a
+  real public signup path**, layered on top of (not replacing) the
+  operator-only `create-tenant` CLI. Verified live against the actual
+  Supabase project: real signup, real email-confirmation-required
+  behavior, real rate-limit response surfaced honestly in the UI rather
+  than worked around.
+- **Team invites** (`invite.go`/`invite_api.go`, new `invites` table).
+  An admin can add a viewer/co-admin without shell access: `POST
+  /api/v1/invites` (admin-only) stores a pending `(tenant_id, email,
+  role)` row; the invited person's *first* Supabase login checks for a
+  pending invite before falling back to provisioning a brand-new tenant,
+  and joins the inviter's exact tenant with the assigned role
+  (`AcceptInvite`, atomic tx: insert user + delete invite). The entire
+  `/api/v1/invites` resource, including `GET`, is admin-gated — a viewer
+  can't even list pending invites. `TeamsPage.tsx`'s new `MembersCard`
+  (admin-only) is the UI: an email+role form, a pending-invites table
+  with revoke buttons, no link-sending or shell access needed. Verified
+  live end-to-end with two real Supabase users through the actual
+  browser UI: founder invites a teammate by email, the teammate's first
+  real login lands in the founder's exact tenant with the invited role.
+- **A real bug this caught**: `App.tsx`'s top-level auth check originally
+  gated the call to `/api/v1/auth/me` behind "does a Supabase session
+  exist," which made the legacy cookie-session path (every self-hosted/
+  CLI-provisioned tenant) completely unreachable through the dashboard.
+  Caught while designing the E2E auth tests (§3.10), fixed by always
+  calling `/api/v1/auth/me` unconditionally on load.
+
+### 3.10 Real Playwright E2E suite (`controlplane/web/e2e/`)
+
+Committed and green — no longer the "throwaway scripts, never
+committed" gap described in earlier drafts of this document (see the
+now-corrected §6/§8 below). `globalSetup.ts` builds the actual
+`controlplane` binary from source, provisions a real tenant + admin +
+viewer via the real `create-tenant`/`create-user` CLI subcommands (the
+same code path a real operator uses), starts the real server, and
+ingests real findings via a real HTTP POST to `/api/v1/ingest` — the
+same discipline every manual verification pass in this project has used
+all along, now automated and repeatable instead of one-off. Runs against
+the system's `/usr/bin/google-chrome` (Playwright's bundled-browser
+install needs root, unavailable in this sandbox) via `launchOptions` in
+`playwright.config.ts`. 13 tests across 4 files (`auth`, `dashboard`,
+`role-gating`, `teams`), all passing against the live server: session
+cookie reaches the dashboard, wrong password gets a real 401, logout
+actually revokes the server-side session, a viewer's direct API POSTs
+get real 403s, an admin's real namespace→team mapping and real teammate
+invite both round-trip through the actual API. Caught a real bug along
+the way (the logout regression in §3.9). Run: `cd controlplane/web &&
+npm run test:e2e` (needs Node ≥20; system Node in this dev environment
+is 18, worked around with a portable Node 20 install).
+
 ---
 
 ## 4. Frontend — component inventory
@@ -547,13 +621,13 @@ controlplane`, add `docker-build-controlplane` and
 punch-list item §8.5 below, upgraded from "nice to have" framing to
 "concrete, unmitigated risk."
 
-Separately: none of this session's live-Playwright verification scripts
-(the ones that started a real server, ingested real data, clicked
-through the UI, and asserted on rendered text) are committed anywhere —
-they were written to a scratch directory, run once each, and deleted.
-That compounds with the gap above: there is currently no automated
-regression coverage at all for anything a browser would see, for either
-module.
+Update: the browser-regression gap this paragraph used to describe is
+now closed for `controlplane/` — see §3.10's committed Playwright suite
+(13 tests, builds a real binary, provisions real tenants, runs against a
+real server). What's still missing is CI wiring it into every push (it
+currently only runs when someone remembers to run it locally) and any
+equivalent browser-level suite for `agent/`'s dashboard-adjacent paths,
+if any end up needed.
 
 ---
 
@@ -582,7 +656,7 @@ labeled, never filled with invented numbers:
 | 2 | An actual second cloud deployed with the new GCP price book | You | 5 min per agent | Plumbing is 100% real and tested (`pricebook/gcp.yaml`, `values-gcp.yaml`, `SpendByCloud()`, the donut). What's missing: a second live agent actually running `-pricebook=pricebook/gcp.yaml` (or `values-gcp.yaml` via Helm) against a real GCP-hosted workload. `helm install -f values.yaml -f values-gcp.yaml`. |
 | 3 | A deeper forecasting model, if Holt's isn't enough | Both | Large | Needs (a) enough retained history to fit a seasonal component meaningfully — data is agent-refresh-cadence snapshots, not calendar-aligned, so a real seasonal model needs a time-bucketing decision first; (b) a genuine choice between ARIMA/Prophet/a small neural sequence model, each with different data-volume requirements this system hasn't validated it has. |
 | 4 | Frontend bundle size (930KB, no code-splitting) | Me | Small | `React.lazy()` + dynamic `import()` per sidebar page — Overview + Sidebar are the only things needed on first paint; the other 14 pages could each be their own chunk. |
-| 5 | **CI coverage for `controlplane/` (upgraded from "commit the Playwright scripts")** | Me | Medium | Mirror the three `agent/` CI jobs (`go test`, Docker build, `helm lint`/`template`) with `working-directory: controlplane`, targeting `deploy/helm/controlplane`. Separately, promote the best of this session's throwaway Playwright verification scripts into a real `test/e2e/` suite. Together these close the "verified once by hand" gap described in §6. |
+| 5 | **CI coverage for `controlplane/`** | Me | Medium | Mirror the three `agent/` CI jobs (`go test`, Docker build, `helm lint`/`template`) with `working-directory: controlplane`, targeting `deploy/helm/controlplane`, and add a job that runs the now-committed `controlplane/web/e2e/` Playwright suite (§3.10) on every push instead of only locally. The suite itself is done; only the CI wiring is left. |
 | 6 | Business/GTM (pricing, personas, launch) | You | Deprioritized | No pricing page, no persona docs, no launch plan — explicitly deprioritized per prior direction ("technical completeness came first"). |
 
 ---
