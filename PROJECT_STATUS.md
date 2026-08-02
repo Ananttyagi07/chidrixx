@@ -1,6 +1,6 @@
 # chidrixx — Project & Technical Status (Universal Reference)
 
-_Last updated: 2026-08-02 (real Supabase auth, self-service team invites, and a committed Playwright E2E suite)_
+_Last updated: 2026-08-02 (real Supabase auth, self-service team invites, a committed Playwright E2E suite, and CI coverage for controlplane/)_
 
 This is the single, complete picture of chidrixx: what's real and
 verified, what's explicitly not built (and why), what's actually left to
@@ -9,9 +9,9 @@ underneath every claim: which file, which function, which DB column,
 which test, which command proved it. Nothing here is recalled from
 memory; every number was measured against the actual repository at the
 commit this file was last updated against (`git log -1` at write time:
-`787f7dd`, "controlplane/web: real Playwright E2E suite + fix a real
-logout bug it caught"), by running `go build`, `go test`, `gofmt -l`,
-`find`/`wc`/`grep`, `helm lint`/`template`, and live Playwright/curl
+`0967fdc`, "ci: add CI coverage for controlplane/ — closes punch-list
+item #5"), by running `go build`, `go test`, `gofmt -l`, `find`/`wc`/
+`grep`, `docker build`, `helm lint`/`template`, and live Playwright/curl
 passes against both a real k3d cluster and a real running
 `controlplane` server — not written and assumed to work.
 
@@ -591,7 +591,8 @@ commands), `templates/_helpers.tpl`.
 
 ## 6. CI (`.github/workflows/ci.yml`) — verified against the actual file, not assumed
 
-Three jobs, **all scoped to the `agent/` module only**:
+Seven jobs total now — the original three, `agent/`-only, plus four new
+ones giving `controlplane/` equal coverage:
 
 1. `build-and-test` (`working-directory: agent`): `gofmt -l` check, `go vet`,
    `go build`, `go test ./... -v` (unprivileged), then recompiles
@@ -606,28 +607,32 @@ Three jobs, **all scoped to the `agent/` module only**:
    `Dockerfile`. Agent only.
 3. `helm-lint`: `helm lint` + `helm template` against
    `deploy/helm/kharcha` **only**.
+4. `build-and-test-controlplane` **(new)** (`working-directory:
+   controlplane`): the same `gofmt`/`go vet`/`go build`/`go test`
+   sequence as job 1, covering all 58+ control-plane test functions.
+5. `docker-build-controlplane` **(new)**: builds `chidrixx-controlplane:ci`
+   from `controlplane/Dockerfile`.
+6. `helm-lint-controlplane` **(new)**: `helm lint` + `helm template`
+   against `deploy/helm/controlplane`.
+7. `e2e-controlplane` **(new)**: installs Node 20 + runs `npm ci` in
+   `controlplane/web`, then `npm run test:e2e` — the real Playwright
+   suite from §3.10, on every push now instead of only when someone
+   remembers to run it locally. Relies on the Google Chrome
+   GitHub-hosted `ubuntu-latest` runners ship preinstalled (same
+   `launchOptions.executablePath` approach used for local dev — no
+   `playwright install --with-deps` needed). Uploads the Playwright
+   report as a build artifact on failure.
 
-**What this means concretely: `controlplane/` has zero CI coverage
-today.** Its 58 Go tests, its Docker build, and both Helm charts'
-`helm lint`/`helm template` — none of that runs automatically anywhere.
-Every verification of the control plane in this document was run by
-hand, locally, this session (and prior ones). This is a bigger, more
-concrete gap than a passing mention: a change to `controlplane/` today
-could break `go build`, break a test, or break the Helm chart, and
-nothing would catch it before a human runs it manually. Fixing this is
-mechanical (mirror the three `agent/` jobs with `working-directory:
-controlplane`, add `docker-build-controlplane` and
-`helm-lint-controlplane` targets) but it hasn't been done — this is
-punch-list item §8.5 below, upgraded from "nice to have" framing to
-"concrete, unmitigated risk."
+All four new jobs verified locally before being committed: `gofmt -l`,
+`go vet`, `go build`, `go test` all clean; `docker build controlplane`
+succeeds end-to-end; the workflow YAML parses. `helm lint`/`template`
+weren't runnable locally (no `helm` binary in this dev environment) but
+use the identical pattern as the pre-existing, working `kharcha` job.
 
-Update: the browser-regression gap this paragraph used to describe is
-now closed for `controlplane/` — see §3.10's committed Playwright suite
-(13 tests, builds a real binary, provisions real tenants, runs against a
-real server). What's still missing is CI wiring it into every push (it
-currently only runs when someone remembers to run it locally) and any
-equivalent browser-level suite for `agent/`'s dashboard-adjacent paths,
-if any end up needed.
+This closes what was punch-list item §8.5 and the "zero CI coverage for
+controlplane" gap this section used to describe — a change to
+`controlplane/` today now gets the same automatic build/test/Docker/Helm/
+E2E coverage `agent/` always had.
 
 ---
 
@@ -656,8 +661,11 @@ labeled, never filled with invented numbers:
 | 2 | An actual second cloud deployed with the new GCP price book | You | 5 min per agent | Plumbing is 100% real and tested (`pricebook/gcp.yaml`, `values-gcp.yaml`, `SpendByCloud()`, the donut). What's missing: a second live agent actually running `-pricebook=pricebook/gcp.yaml` (or `values-gcp.yaml` via Helm) against a real GCP-hosted workload. `helm install -f values.yaml -f values-gcp.yaml`. |
 | 3 | A deeper forecasting model, if Holt's isn't enough | Both | Large | Needs (a) enough retained history to fit a seasonal component meaningfully — data is agent-refresh-cadence snapshots, not calendar-aligned, so a real seasonal model needs a time-bucketing decision first; (b) a genuine choice between ARIMA/Prophet/a small neural sequence model, each with different data-volume requirements this system hasn't validated it has. |
 | 4 | Frontend bundle size (930KB, no code-splitting) | Me | Small | `React.lazy()` + dynamic `import()` per sidebar page — Overview + Sidebar are the only things needed on first paint; the other 14 pages could each be their own chunk. |
-| 5 | **CI coverage for `controlplane/`** | Me | Medium | Mirror the three `agent/` CI jobs (`go test`, Docker build, `helm lint`/`template`) with `working-directory: controlplane`, targeting `deploy/helm/controlplane`, and add a job that runs the now-committed `controlplane/web/e2e/` Playwright suite (§3.10) on every push instead of only locally. The suite itself is done; only the CI wiring is left. |
-| 6 | Business/GTM (pricing, personas, launch) | You | Deprioritized | No pricing page, no persona docs, no launch plan — explicitly deprioritized per prior direction ("technical completeness came first"). |
+| 5 | Business/GTM (pricing, personas, launch) | You | Deprioritized | No pricing page, no persona docs, no launch plan — explicitly deprioritized per prior direction ("technical completeness came first"). |
+
+**Done since the last version of this table**: CI coverage for
+`controlplane/` (was item #5) — see §6, seven jobs now, `controlplane/`
+has the same build/test/Docker/Helm/E2E coverage `agent/` always had.
 
 ---
 
