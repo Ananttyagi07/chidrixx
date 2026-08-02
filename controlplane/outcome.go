@@ -38,29 +38,53 @@ type RecommendationOutcome struct {
 // stays visible, but shown/predicted/cost-before fields freeze.
 func (s *Store) RecordRecommendationsShown(tenantID int64, fixes []FindingRow) error {
 	now := time.Now().Unix()
+
+	// One transaction for the whole batch, not one auto-committed
+	// transaction per fix. Found necessary against real production data:
+	// this runs on every single dashboard-summary request (every page
+	// load and every 15s auto-refresh), and with SQLite's default
+	// synchronous=FULL + rollback-journal settings, each individual
+	// commit does a real fsync -- up to 10 separate fsyncs per request
+	// measured contributing multiple real seconds to dashboard-summary's
+	// response time on this deployment's storage layer. Batching cuts
+	// that to one fsync for the whole call.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("record recommendations shown: begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO recommendation_outcomes (
+			tenant_id, cluster_id, source, destination, path_class, fix_hint,
+			predicted_savings_low_inr, predicted_savings_high_inr, cost_before_inr,
+			first_shown_at, last_shown_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(tenant_id, cluster_id, source, destination, path_class) DO UPDATE SET
+			last_shown_at = excluded.last_shown_at,
+			fix_hint = CASE WHEN applied_at IS NULL THEN excluded.fix_hint ELSE fix_hint END,
+			predicted_savings_low_inr = CASE WHEN applied_at IS NULL THEN excluded.predicted_savings_low_inr ELSE predicted_savings_low_inr END,
+			predicted_savings_high_inr = CASE WHEN applied_at IS NULL THEN excluded.predicted_savings_high_inr ELSE predicted_savings_high_inr END,
+			cost_before_inr = CASE WHEN applied_at IS NULL THEN excluded.cost_before_inr ELSE cost_before_inr END
+	`)
+	if err != nil {
+		return fmt.Errorf("record recommendations shown: prepare: %w", err)
+	}
+	defer stmt.Close()
+
 	for _, f := range fixes {
 		if f.FixHint == "" {
 			continue
 		}
-		_, err := s.db.Exec(`
-			INSERT INTO recommendation_outcomes (
-				tenant_id, cluster_id, source, destination, path_class, fix_hint,
-				predicted_savings_low_inr, predicted_savings_high_inr, cost_before_inr,
-				first_shown_at, last_shown_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(tenant_id, cluster_id, source, destination, path_class) DO UPDATE SET
-				last_shown_at = excluded.last_shown_at,
-				fix_hint = CASE WHEN applied_at IS NULL THEN excluded.fix_hint ELSE fix_hint END,
-				predicted_savings_low_inr = CASE WHEN applied_at IS NULL THEN excluded.predicted_savings_low_inr ELSE predicted_savings_low_inr END,
-				predicted_savings_high_inr = CASE WHEN applied_at IS NULL THEN excluded.predicted_savings_high_inr ELSE predicted_savings_high_inr END,
-				cost_before_inr = CASE WHEN applied_at IS NULL THEN excluded.cost_before_inr ELSE cost_before_inr END
-		`, tenantID, f.ClusterID, f.Source, f.Destination, f.PathClass, f.FixHint,
-			f.SavingsLowINR, f.SavingsHighINR, f.CostHighINR, now, now)
-		if err != nil {
+		if _, err := stmt.Exec(
+			tenantID, f.ClusterID, f.Source, f.Destination, f.PathClass, f.FixHint,
+			f.SavingsLowINR, f.SavingsHighINR, f.CostHighINR, now, now,
+		); err != nil {
 			return fmt.Errorf("record recommendation shown: %w", err)
 		}
 	}
-	return nil
+
+	return tx.Commit()
 }
 
 var ErrOutcomeNotFound = errors.New("recommendation outcome not found")
@@ -136,6 +160,13 @@ func (s *Store) measurePendingOutcomes(tenantID int64) error {
 		return err
 	}
 
+	// One transaction for every real update in this pass, not one
+	// auto-committed transaction per outcome -- same fsync-per-commit
+	// reasoning as RecordRecommendationsShown.
+	var toUpdate []struct {
+		id        int64
+		costAfter float64
+	}
 	for _, p := range pendings {
 		var latestReportedAt int64
 		if err := s.db.QueryRow(`
@@ -161,14 +192,35 @@ func (s *Store) measurePendingOutcomes(tenantID int64) error {
 		if errors.Is(err, sql.ErrNoRows) {
 			costAfter = 0 // the flow is gone from the latest snapshot -- fixed.
 		}
+		toUpdate = append(toUpdate, struct {
+			id        int64
+			costAfter float64
+		}{p.id, costAfter})
+	}
 
-		if _, err := s.db.Exec(`
-			UPDATE recommendation_outcomes SET cost_after_inr = ?, measured_at = ? WHERE id = ?
-		`, costAfter, time.Now().Unix(), p.id); err != nil {
-			return fmt.Errorf("save measured outcome %d: %w", p.id, err)
+	if len(toUpdate) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("measure pending outcomes: begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`UPDATE recommendation_outcomes SET cost_after_inr = ?, measured_at = ? WHERE id = ?`)
+	if err != nil {
+		return fmt.Errorf("measure pending outcomes: prepare: %w", err)
+	}
+	defer stmt.Close()
+
+	now := time.Now().Unix()
+	for _, u := range toUpdate {
+		if _, err := stmt.Exec(u.costAfter, now, u.id); err != nil {
+			return fmt.Errorf("save measured outcome %d: %w", u.id, err)
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ListRecommendationOutcomes measures any outcomes that can now be

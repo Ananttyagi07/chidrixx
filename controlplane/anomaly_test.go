@@ -28,7 +28,7 @@ func TestDetectAnomaliesFlagsGrowthAboveThreshold(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	anomalies, err := detectAnomalies(s, tenantID)
+	anomalies, err := detectAnomalies(s, tenantID, []string{"cluster-a", "cluster-b"})
 	if err != nil {
 		t.Fatalf("detectAnomalies: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestDetectAnomaliesCorrelatesWithRecentDeployEvent(t *testing.T) {
 		t.Fatalf("IngestDeployEvents: %v", err)
 	}
 
-	anomalies, err := detectAnomalies(s, tenantID)
+	anomalies, err := detectAnomalies(s, tenantID, []string{"cluster-a"})
 	if err != nil {
 		t.Fatalf("detectAnomalies: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestDetectAnomaliesDoesNotCorrelateEventsOutsideLookbackWindow(t *testing.T
 		t.Fatalf("IngestDeployEvents: %v", err)
 	}
 
-	anomalies, err := detectAnomalies(s, tenantID)
+	anomalies, err := detectAnomalies(s, tenantID, []string{"cluster-a"})
 	if err != nil {
 		t.Fatalf("detectAnomalies: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestDetectAnomaliesSkipsClustersWithOnlyOneSnapshot(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	anomalies, err := detectAnomalies(s, tenantID)
+	anomalies, err := detectAnomalies(s, tenantID, []string{"cluster-a"})
 	if err != nil {
 		t.Fatalf("detectAnomalies: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestDetectAnomaliesSkipsZeroBaseline(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	anomalies, err := detectAnomalies(s, tenantID)
+	anomalies, err := detectAnomalies(s, tenantID, []string{"cluster-a"})
 	if err != nil {
 		t.Fatalf("detectAnomalies: %v", err)
 	}

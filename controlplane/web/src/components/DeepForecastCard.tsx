@@ -112,7 +112,11 @@ export function DeepForecastCard({ clusters }: { clusters: ClusterSummaryView[] 
               Model: <span className="font-mono">{data.result.model === "damped_holt" ? "damped Holt" : "Holt"}</span>
             </div>
             <div>
-              Points used: <span className="font-mono tabular-nums">{data.result.points_used}</span>
+              Real history retained: <span className="font-mono tabular-nums">{data.result.points_retained}</span>
+            </div>
+            <div>
+              Points used for fit:{" "}
+              <span className="font-mono tabular-nums">{data.result.points_used_for_fit}</span>
             </div>
             {data.result.backtest_folds > 0 ? (
               <>

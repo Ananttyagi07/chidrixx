@@ -94,13 +94,38 @@ func fitBestHolt(ys []float64, allowDamping bool) HoltParams {
 	return best
 }
 
+// maxFitWindow bounds how many of the most recent points any single
+// Holt fit actually trains on. Found necessary against real production
+// data, not theoretical: a live cluster with ~4,200 real retained
+// snapshots made every backtest fold refit from the start of the whole
+// series (Holt's level/trend accumulate sequentially, so fitting "up to
+// origin" costs O(origin) every time), which measured at ~1.6 real CPU-
+// seconds per request on this exact deployment and was starving the
+// pod's single CPU core for other requests. Capping the training window
+// makes each fit O(min(origin, maxFitWindow)) instead of O(origin) --
+// and is arguably the more correct choice anyway: weighting a "recent
+// trend" projection on thousands of multi-day-old snapshots isn't
+// obviously better than a bounded recent window, which is how
+// exponential smoothing is normally used in practice.
+const maxFitWindow = 400
+
+// recentWindow returns the most recent min(end, maxFitWindow) points
+// ending at index `end` (exclusive) of ys.
+func recentWindow(ys []float64, end int) []float64 {
+	start := end - maxFitWindow
+	if start < 0 {
+		start = 0
+	}
+	return ys[start:end]
+}
+
 // backtestMAE runs real rolling-origin (walk-forward) validation: at each
-// of several real cut points in the series, fit the model on data up to
-// that point only, forecast `horizon` steps ahead, and compare against
-// the real value that actually occurred there. This is genuine
-// out-of-sample error, not the in-sample fit error fitBestHolt
-// minimizes -- the two answer different questions (how well does it fit
-// vs. how well would it actually have predicted).
+// of several real cut points in the series, fit the model on a bounded
+// recent window ending at that point, forecast `horizon` steps ahead,
+// and compare against the real value that actually occurred there. This
+// is genuine out-of-sample error, not the in-sample fit error
+// fitBestHolt minimizes -- the two answer different questions (how well
+// does it fit vs. how well would it actually have predicted).
 func backtestMAE(ys []float64, horizon int, allowDamping bool) (mae float64, folds int) {
 	n := len(ys)
 	minTrain := 5 // need at least this many points to fit a meaningful model
@@ -127,7 +152,7 @@ func backtestMAE(ys []float64, horizon int, allowDamping bool) (mae float64, fol
 
 	var totalAbsErr float64
 	for _, origin := range origins {
-		train := ys[:origin]
+		train := recentWindow(ys, origin)
 		params := fitBestHolt(train, allowDamping)
 		_, _, level, trend := holtFit(train, params)
 		predicted := holtForecastAhead(level, trend, params, horizon)
@@ -152,7 +177,8 @@ type DeepForecastResult struct {
 	Alpha             float64             `json:"alpha"`
 	Beta              float64             `json:"beta"`
 	Phi               float64             `json:"phi"`
-	PointsUsed        int                 `json:"points_used"`
+	PointsRetained    int                 `json:"points_retained"`     // total real history available
+	PointsUsedForFit  int                 `json:"points_used_for_fit"` // bounded recent window actually fit (see maxFitWindow)
 	BacktestFolds     int                 `json:"backtest_folds"`
 	BacktestMAEHolt   float64             `json:"backtest_mae_holt"`
 	BacktestMAEDamped float64             `json:"backtest_mae_damped"`
@@ -162,9 +188,11 @@ type DeepForecastResult struct {
 // ComputeDeepForecast is the real model-selection entry point: backtests
 // plain Holt against damped Holt on the real held-out history and picks
 // whichever actually measured lower error, then fits that winning model
-// on the FULL real history for the final forecast. Returns nil when
-// there isn't enough real history to backtest meaningfully -- an honest
-// "not enough data" rather than a forced comparison on too few points.
+// on the most recent maxFitWindow points for the final forecast (see
+// maxFitWindow's own comment for why the window is bounded rather than
+// unlimited). Returns nil when there isn't enough real history to
+// backtest meaningfully -- an honest "not enough data" rather than a
+// forced comparison on too few points.
 func ComputeDeepForecast(ys []float64, horizon int) *DeepForecastResult {
 	n := len(ys)
 	if n < 3 {
@@ -175,17 +203,20 @@ func ComputeDeepForecast(ys []float64, horizon int) *DeepForecastResult {
 	dampedMAE, _ := backtestMAE(ys, minInt(horizon, 5), true)
 
 	useDamped := folds > 0 && dampedMAE < holtMAE
-	params := fitBestHolt(ys, useDamped)
-	_, _, level, trend := holtFit(ys, params)
+	fitYs := recentWindow(ys, n)
+	params := fitBestHolt(fitYs, useDamped)
+	_, _, level, trend := holtFit(fitYs, params)
 
 	// Residual std dev from the final model's own in-sample one-step
-	// errors -- the same honest, computed (not cosmetic) interval
-	// methodology as the existing client-side model.
-	fitted, _, _, _ := holtFit(ys, params)
+	// errors, over the same window it was fit on -- the same honest,
+	// computed (not cosmetic) interval methodology as the existing
+	// client-side model.
+	fitted, _, _, _ := holtFit(fitYs, params)
+	fitN := len(fitYs)
 	var sumErr, sumSqErr float64
 	count := 0
-	for i := 1; i < n; i++ {
-		e := ys[i] - fitted[i]
+	for i := 1; i < fitN; i++ {
+		e := fitYs[i] - fitted[i]
 		sumErr += e
 		count++
 	}
@@ -193,8 +224,8 @@ func ComputeDeepForecast(ys []float64, horizon int) *DeepForecastResult {
 	if count > 0 {
 		meanErr = sumErr / float64(count)
 	}
-	for i := 1; i < n; i++ {
-		e := ys[i] - fitted[i]
+	for i := 1; i < fitN; i++ {
+		e := fitYs[i] - fitted[i]
 		sumSqErr += (e - meanErr) * (e - meanErr)
 	}
 	variance := 0.0
@@ -226,7 +257,8 @@ func ComputeDeepForecast(ys []float64, horizon int) *DeepForecastResult {
 		Alpha:             params.Alpha,
 		Beta:              params.Beta,
 		Phi:               params.Phi,
-		PointsUsed:        n,
+		PointsRetained:    n,
+		PointsUsedForFit:  fitN,
 		BacktestFolds:     folds,
 		BacktestMAEHolt:   holtMAE,
 		BacktestMAEDamped: dampedMAE,

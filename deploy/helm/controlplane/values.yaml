@@ -7,6 +7,17 @@ service:
   type: ClusterIP
   port: 8090
 
+# The real Groq-backed chat assistant / anomaly narrator (controlplane/
+# groq.go). Optional: unset means those features honestly 503 rather
+# than the control plane failing to start. Same pattern as
+# auth.adminPasswordSecretName -- a credential doesn't belong in a plain
+# Helm value, so this only ever references a secret you create yourself:
+#   kubectl create secret generic <name> --from-literal=apiKey=<your key>
+groq:
+  apiKeySecretName: ""
+  apiKeySecretKey: "apiKey"
+  model: "" # optional override, e.g. llama-3.3-70b-versatile (the binary's own default)
+
 # The SQLite store needs to survive pod restarts/rescheduling — a single
 # ReadWriteOnce volume is enough since this runs as one replica (SQLite is
 # single-writer; don't scale this beyond 1 without moving to a real

@@ -75,7 +75,8 @@ export interface DeepForecastResult {
   alpha: number;
   beta: number;
   phi: number;
-  points_used: number;
+  points_retained: number;
+  points_used_for_fit: number;
   backtest_folds: number;
   backtest_mae_holt: number;
   backtest_mae_damped: number;

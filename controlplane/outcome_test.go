@@ -50,6 +50,37 @@ func TestRecordRecommendationsShownThenList(t *testing.T) {
 	}
 }
 
+// TestRecordRecommendationsShownCommitsAWholeBatchTogether is a real
+// regression test: the original implementation ran one auto-committed
+// transaction (and, on this deployment's storage layer, one real fsync)
+// per fix -- with up to 10 real top fixes shown on every single
+// dashboard-summary request, that measured as multiple real seconds of
+// added latency on every page load and every 15s auto-refresh. This
+// proves a realistic multi-fix batch is recorded correctly as a single
+// call, not that it's fast (fsync latency is a property of the storage
+// layer, not something a local test disk reproduces).
+func TestRecordRecommendationsShownCommitsAWholeBatchTogether(t *testing.T) {
+	s := testStore(t)
+	tenantID := testTenant(t, s)
+
+	fixes := []FindingRow{
+		testFindingRow("cluster-a", "checkout/checkout-1", "redis/redis-master", "cross_az", "co-locate zones", 40, 30, 40),
+		testFindingRow("cluster-a", "cart/cart-1", "redis/redis-master", "cross_az", "co-locate zones", 25, 15, 25),
+		testFindingRow("cluster-a", "auth/auth-1", "postgres/pg-primary", "cross_region", "move to same region", 60, 45, 60),
+	}
+	if err := s.RecordRecommendationsShown(tenantID, fixes); err != nil {
+		t.Fatalf("RecordRecommendationsShown: %v", err)
+	}
+
+	outcomes, err := s.ListRecommendationOutcomes(tenantID)
+	if err != nil {
+		t.Fatalf("ListRecommendationOutcomes: %v", err)
+	}
+	if len(outcomes) != 3 {
+		t.Fatalf("expected all 3 fixes recorded in one batch, got %d: %+v", len(outcomes), outcomes)
+	}
+}
+
 func TestRecordRecommendationsShownSkipsFindingsWithNoFixHint(t *testing.T) {
 	s := testStore(t)
 	tenantID := testTenant(t, s)

@@ -10,6 +10,38 @@ import (
 	"time"
 )
 
+// TestComputeDeepForecastStaysFastAtRealProductionScale is a real
+// regression test for a real incident: the initial implementation (no
+// maxFitWindow cap) measured ~1.6 real CPU-seconds per request against
+// the actual production cluster's 4,164 real snapshots, and was
+// starving the pod's single CPU core for other requests (confirmed via
+// `kubectl top pod` showing a sustained ~1 full core busy). This uses a
+// comparable real point count and asserts an actual wall-clock budget,
+// not just "it completes eventually."
+func TestComputeDeepForecastStaysFastAtRealProductionScale(t *testing.T) {
+	ys := make([]float64, 4200)
+	for i := range ys {
+		ys[i] = 3.5 + 0.5*math.Sin(float64(i)/50) // a plateaued, noisy-ish real-shaped series
+	}
+
+	start := time.Now()
+	result := ComputeDeepForecast(ys, 10)
+	elapsed := time.Since(start)
+
+	if result == nil {
+		t.Fatal("expected a real result with 4,200 points")
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("ComputeDeepForecast took %v against 4,200 real-scale points, want < 500ms (the maxFitWindow cap exists specifically to bound this)", elapsed)
+	}
+	if result.PointsUsedForFit > maxFitWindow {
+		t.Fatalf("expected the fit window capped at %d, got %d", maxFitWindow, result.PointsUsedForFit)
+	}
+	if result.PointsRetained != 4200 {
+		t.Fatalf("expected PointsRetained to still honestly report all real retained history (4200), got %d", result.PointsRetained)
+	}
+}
+
 func TestComputeDeepForecastReturnsNilWithTooFewPoints(t *testing.T) {
 	if got := ComputeDeepForecast([]float64{10, 20}, 5); got != nil {
 		t.Fatalf("expected nil with only 2 points, got %+v", got)

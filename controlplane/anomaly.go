@@ -33,23 +33,27 @@ type Anomaly struct {
 	LikelyCause     *DeployEvent `json:"likely_cause,omitempty"`
 }
 
-// detectAnomalies compares each cluster's two most recent snapshots and
-// flags any whose total cost grew by at least anomalyGrowthRatioThreshold.
-// A cluster with fewer than two snapshots ever ingested has nothing to
-// compare against and is silently skipped -- not flagged, not assumed
-// normal, just not enough history yet to say either way.
-func detectAnomalies(store *Store, tenantID int64) ([]Anomaly, error) {
-	clusters, err := store.Clusters(tenantID)
-	if err != nil {
-		return nil, fmt.Errorf("list clusters: %w", err)
-	}
-
+// detectAnomalies compares each of the given clusters' two most recent
+// snapshots and flags any whose total cost grew by at least
+// anomalyGrowthRatioThreshold. A cluster with fewer than two snapshots
+// ever ingested has nothing to compare against and is silently skipped --
+// not flagged, not assumed normal, just not enough history yet to say
+// either way.
+//
+// Takes clusterIDs rather than calling store.Clusters itself: that query
+// re-derives "the latest snapshot per cluster" via a real, measured-
+// expensive full index scan (see summary.go's comment), and
+// handleDashboardSummary -- the hottest caller -- already has that list
+// from its own earlier store.Clusters call. Callers with no such list
+// handy (the chat assistant's tool, the anomaly narrator's API) just
+// fetch it themselves first.
+func detectAnomalies(store *Store, tenantID int64, clusterIDs []string) ([]Anomaly, error) {
 	anomalies := make([]Anomaly, 0)
 
-	for _, c := range clusters {
-		trend, err := store.CostTrend(tenantID, c.ClusterID, 2)
+	for _, clusterID := range clusterIDs {
+		trend, err := store.CostTrend(tenantID, clusterID, 2)
 		if err != nil {
-			return nil, fmt.Errorf("cost trend for %s: %w", c.ClusterID, err)
+			return nil, fmt.Errorf("cost trend for %s: %w", clusterID, err)
 		}
 
 		if len(trend) < 2 {
@@ -66,7 +70,7 @@ func detectAnomalies(store *Store, tenantID int64) ([]Anomaly, error) {
 		ratio := current / previous
 		if ratio >= anomalyGrowthRatioThreshold {
 			anomaly := Anomaly{
-				ClusterID:       c.ClusterID,
+				ClusterID:       clusterID,
 				PreviousCostINR: previous,
 				CurrentCostINR:  current,
 				GrowthRatio:     ratio,
@@ -74,11 +78,11 @@ func detectAnomalies(store *Store, tenantID int64) ([]Anomaly, error) {
 
 			currentSnapshotTime := trend[len(trend)-1].ReportedAt
 			events, err := store.RecentDeployEvents(
-				tenantID, c.ClusterID,
+				tenantID, clusterID,
 				currentSnapshotTime.Add(-anomalyCauseLookback), currentSnapshotTime,
 			)
 			if err != nil {
-				return nil, fmt.Errorf("recent deploy events for %s: %w", c.ClusterID, err)
+				return nil, fmt.Errorf("recent deploy events for %s: %w", clusterID, err)
 			}
 			if len(events) > 0 {
 				anomaly.LikelyCause = &events[0] // RecentDeployEvents orders most-recent-first

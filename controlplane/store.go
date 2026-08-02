@@ -20,14 +20,52 @@ type Store struct {
 }
 
 func OpenStore(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	// Pragmas are applied via DSN (modernc.org/sqlite runs them on every
+	// new connection the pool opens, not just the first) rather than a
+	// one-time db.Exec after Open -- that distinction matters now that
+	// MaxOpenConns is >1 (see below): synchronous and busy_timeout are
+	// per-connection settings, so every connection needs them, not just
+	// whichever one happened to be open first.
+	//
+	// Found necessary against real production data, not theoretical:
+	// default SQLite settings (rollback-journal mode, synchronous=FULL,
+	// one shared connection) measured escalating to 20-40+ real seconds
+	// per request on a live deployment once flow_aggregate (never
+	// pruned, by design) grew past ~500MB/2M rows -- confirmed via a
+	// trivial session-lookup endpoint (touching none of that table)
+	// still taking 4+ real seconds, proving it was connection-level
+	// queuing (every request serialized through one connection), not
+	// query cost (the same real query ran in under a second directly
+	// against a copy of the same data). WAL mode plus a small reader
+	// pool is the standard, well-established fix for exactly this shape
+	// of workload (one writer, frequent small commits, many concurrent
+	// readers) -- WAL specifically exists so readers don't block behind
+	// the writer or each other.
+	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite %s: %w", path, err)
 	}
 
-	// SQLite handles one writer at a time; a single connection avoids
-	// "database is locked" errors under concurrent ingest.
-	db.SetMaxOpenConns(1)
+	// SQLite still allows only one writer at a time regardless of journal
+	// mode -- busy_timeout above makes a second would-be writer wait
+	// briefly instead of instantly erroring. This pool size is for
+	// concurrent readers (dashboard polls, multiple browser tabs), which
+	// WAL mode makes safe without blocking on the writer.
+	//
+	// ":memory:" is the one real exception: a bare in-memory DSN gives
+	// every new pooled connection its OWN independent, empty database
+	// (no shared backing file for WAL to coordinate through) -- confirmed
+	// directly, not assumed: a throwaway test opening 4 connections
+	// against ":memory:" with MaxOpenConns(4) found connection 0 saw a
+	// real inserted row and connections 1-3 each got "no such table."
+	// Every real (non-test) call site here always passes a real file
+	// path, so this only ever matters for the test suite's in-memory
+	// helper -- and it must stay pinned at 1 connection to remain
+	// correct, not just because it happened to pass so far.
+	if path != ":memory:" {
+		db.SetMaxOpenConns(4)
+	}
 
 	const schema = `
 CREATE TABLE IF NOT EXISTS flow_aggregate (

@@ -38,6 +38,17 @@ spec:
                   name: {{ $pwSecret }}
                   key: {{ .Values.auth.adminPasswordSecretKey }}
           {{- end }}
+          {{- if .Values.groq.apiKeySecretName }}
+            - name: GROQ_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.groq.apiKeySecretName }}
+                  key: {{ .Values.groq.apiKeySecretKey }}
+          {{- end }}
+          {{- if .Values.groq.model }}
+            - name: GROQ_MODEL
+              value: {{ .Values.groq.model | quote }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}

@@ -8,6 +8,14 @@ import (
 	"sort"
 )
 
+// dashboardSummaryFindingsLimit bounds how many of the tenant's latest-
+// snapshot rows get fetched once and reused for every aggregate this
+// endpoint computes (Summary/SpendByClass/SpendByCloud/SpendByTeam/
+// TopFixes) -- comfortably above the largest real combined snapshot
+// fan-out observed in production (671 rows across 2 clusters at write
+// time) with headroom, while still bounding the query.
+const dashboardSummaryFindingsLimit = 5000
+
 // clusterSummaryView is one cluster's headline plus its own cost trend,
 // for a per-cluster sparkline.
 type clusterSummaryView struct {
@@ -41,16 +49,14 @@ func handleDashboardSummary(store *Store) http.HandlerFunc {
 			return
 		}
 
-		summary, err := store.Summary(tenantID)
+		// Fetched once, reused for every aggregate below (Summary,
+		// SpendByClass, SpendByCloud, SpendByTeam, TopFixes) instead of
+		// each independently re-querying "the latest snapshot per
+		// cluster" -- see summary.go's comment for why this mattered
+		// against real production data.
+		findings, err := store.LatestFindings(tenantID, dashboardSummaryFindingsLimit)
 		if err != nil {
-			log.Printf("dashboard-summary: summary: %v", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-
-		spendByClass, err := store.SpendByClass(tenantID)
-		if err != nil {
-			log.Printf("dashboard-summary: spend by class: %v", err)
+			log.Printf("dashboard-summary: findings: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -69,6 +75,15 @@ func handleDashboardSummary(store *Store) http.HandlerFunc {
 			return
 		}
 
+		clusterIDs := make([]string, len(clusters))
+		for i, c := range clusters {
+			clusterIDs[i] = c.ClusterID
+		}
+
+		summary := computeSummary(findings, len(clusters))
+		spendByClass := computeSpendByClass(findings)
+		spendByCloud := computeSpendByCloud(findings)
+
 		clusterViews := make([]clusterSummaryView, 0, len(clusters))
 		for _, c := range clusters {
 			clusterTrend, err := store.CostTrend(tenantID, c.ClusterID, 20)
@@ -82,13 +97,6 @@ func handleDashboardSummary(store *Store) http.HandlerFunc {
 				ClusterSummary: c,
 				Trend:          clusterTrend,
 			})
-		}
-
-		findings, err := store.LatestFindings(tenantID, 500)
-		if err != nil {
-			log.Printf("dashboard-summary: findings: %v", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
 		}
 
 		teamOwnership, err := store.ListTeamOwnership(tenantID)
@@ -119,16 +127,9 @@ func handleDashboardSummary(store *Store) http.HandlerFunc {
 			log.Printf("dashboard-summary: record recommendations shown: %v", err)
 		}
 
-		anomalies, err := detectAnomalies(store, tenantID)
+		anomalies, err := detectAnomalies(store, tenantID, clusterIDs)
 		if err != nil {
 			log.Printf("dashboard-summary: anomalies: %v", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-
-		spendByCloud, err := store.SpendByCloud(tenantID)
-		if err != nil {
-			log.Printf("dashboard-summary: spend by cloud: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}

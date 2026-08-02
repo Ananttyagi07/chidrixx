@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -670,5 +671,59 @@ func TestTenantIsolationAcrossEveryReadPath(t *testing.T) {
 	}
 	if budgetB != 9999 {
 		t.Fatalf("tenant b's budget leaked tenant a's value: got %v, want 9999", budgetB)
+	}
+}
+
+// TestOpenStoreConnectionsShareRealDataAgainstAFile is a real regression
+// test for a genuine bug caught while raising MaxOpenConns above 1 (done
+// to fix a live, measured connection-queuing slowdown): a bare ":memory:"
+// DSN gives every pooled connection its own independent, empty database
+// -- confirmed directly with a throwaway script before this fix existed.
+// A real file-backed store must not have that problem, since WAL mode
+// coordinates multiple connections through the actual file. This proves
+// it concretely: many real concurrent connections, opened explicitly
+// (not relying on however Go's pool happens to schedule them), must all
+// see the exact same real ingested row.
+func TestOpenStoreConnectionsShareRealDataAgainstAFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "concurrent.db")
+	s, err := OpenStore(path)
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	tenantID := testTenant(t, s)
+
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{
+		{Source: "checkout/checkout-1", CostHighINR: 42},
+	}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	const concurrency = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, concurrency)
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			findings, err := s.LatestFindings(tenantID, 10)
+			if err != nil {
+				errs <- fmt.Errorf("LatestFindings: %w", err)
+				return
+			}
+			if len(findings) != 1 || findings[0].CostHighINR != 42 {
+				errs <- fmt.Errorf("expected the real ingested row visible from every connection, got: %+v", findings)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
 	}
 }

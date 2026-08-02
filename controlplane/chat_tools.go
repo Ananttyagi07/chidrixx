@@ -97,7 +97,15 @@ func buildChatTools(store *Store, tenantID int64) []chatTool {
 				},
 			},
 			call: func(_ json.RawMessage) (string, error) {
-				anomalies, err := detectAnomalies(store, tenantID)
+				clusters, err := store.Clusters(tenantID)
+				if err != nil {
+					return "", err
+				}
+				clusterIDs := make([]string, len(clusters))
+				for i, c := range clusters {
+					clusterIDs[i] = c.ClusterID
+				}
+				anomalies, err := detectAnomalies(store, tenantID, clusterIDs)
 				if err != nil {
 					return "", err
 				}

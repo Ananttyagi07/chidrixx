@@ -48,7 +48,9 @@ func handleNarrateAnomaly(store *Store, groq *GroqClient) http.HandlerFunc {
 			return
 		}
 
-		anomalies, err := detectAnomalies(store, tenantID)
+		// Only this one cluster is relevant here, so pass it directly
+		// rather than fetching every cluster the tenant has.
+		anomalies, err := detectAnomalies(store, tenantID, []string{req.ClusterID})
 		if err != nil {
 			log.Printf("narrate-anomaly: detect: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
