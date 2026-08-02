@@ -29,7 +29,9 @@ test("Overview shows the real ingested finding, not fabricated data", async ({ p
 test("Cost Graph renders the real topology with no fabricated latency field", async ({ page }) => {
   await page.goto("/");
   await page.getByText("Cost Graph").click();
-  await expect(page.locator("svg line")).toHaveCount(1, { timeout: 10_000 });
+  // globalSetup ingests 2 real distinct edges (checkout->redis cross_az,
+  // checkout->203.0.113.5 internet_egress).
+  await expect(page.locator("svg line")).toHaveCount(2, { timeout: 10_000 });
 
   const body = await page.locator("body").innerText();
   expect(body).not.toContain("Latency");
@@ -39,6 +41,32 @@ test("Automations lists the real generated NetworkPolicy-style fix, never auto-a
   await page.goto("/");
   await page.getByText("Automations").click();
   await expect(page.getByText(/never applies them automatically/i)).toBeVisible({ timeout: 10_000 });
+});
+
+test("Automations' remediation preview shows a real would-apply and a real would-skip decision", async ({ page }) => {
+  await page.goto("/");
+  await page.getByText("Automations").click();
+  await expect(page.getByText("If auto-remediation were enabled")).toBeVisible({ timeout: 10_000 });
+
+  // The real internet_egress fixture (has a real manifest, high
+  // confidence, positive savings) must qualify...
+  await expect(page.getByText(/Would apply \(1\)/)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("203.0.113.5").first()).toBeVisible();
+
+  // ...and the real cross_az fixture (no manifest -- fixengine.go never
+  // generates one for that class) must not, with a real stated reason.
+  await expect(page.getByText(/Would skip \(1\)/)).toBeVisible();
+  await expect(page.getByText(/no mechanically-generated manifest/)).toBeVisible();
+
+  // Real round-trip through the API, not just what happened to render.
+  const res = await page.request.get("/api/v1/remediation/preview");
+  const body = await res.json();
+  expect(body.decisions).toContainEqual(
+    expect.objectContaining({ destination: "203.0.113.5", would_auto_apply: true }),
+  );
+  expect(body.decisions).toContainEqual(
+    expect.objectContaining({ destination: "redis/redis-master", would_auto_apply: false }),
+  );
 });
 
 test("marking a real fix applied on Overview is tracked server-side, not just a UI toggle", async ({ page }) => {

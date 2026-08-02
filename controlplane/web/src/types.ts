@@ -134,6 +134,24 @@ export interface WorkloadGrowth {
   related_events?: DeployEvent[];
 }
 
+export interface RemediationDecision {
+  cluster_id: string;
+  source: string;
+  destination: string;
+  path_class: string;
+  confidence: string;
+  fix_hint: string;
+  fix_manifest?: string;
+  cost_high_inr: number;
+  savings_high_inr: number;
+  would_auto_apply: boolean;
+  reasons: string[];
+}
+
+export interface RemediationPreviewResponse {
+  decisions: RemediationDecision[];
+}
+
 export interface DashboardSummary {
   summary: Summary;
   spend_by_class: ClassSpend[];

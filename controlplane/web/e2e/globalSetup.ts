@@ -86,6 +86,21 @@ export default async function globalSetup() {
           savings_low_inr: 30, savings_high_inr: 40,
           cloud: "aws", region: "ap-south-1",
         },
+        {
+          // A real manifest-eligible finding (INTERNET_EGRESS, matching
+          // fixengine.go's real scope) so the remediation-preview E2E
+          // test exercises the real "would apply" path, not only "would
+          // skip" -- the cross_az fixture above never gets a real
+          // manifest, by design (see remediation_test.go's comment).
+          source: "checkout/checkout-abc", destination: "203.0.113.5",
+          path_class: "internet_egress", confidence: "high",
+          bytes_tx: 2_000_000_000, bytes_rx: 0,
+          cost_low_inr: 15, cost_high_inr: 20,
+          fix_hint: "deny this destination if it's not required",
+          fix_manifest: "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: deny-203-0-113-5\n  namespace: checkout\n",
+          savings_low_inr: 15, savings_high_inr: 20,
+          cloud: "aws", region: "ap-south-1",
+        },
       ],
     }),
   });
