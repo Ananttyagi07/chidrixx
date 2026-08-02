@@ -11,6 +11,10 @@ test.beforeEach(async ({ context }) => {
 test("Overview shows the real ingested finding, not fabricated data", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("Overview")).toBeVisible({ timeout: 10_000 });
+  // "Overview" (the sidebar link) renders before the async dashboard-summary
+  // fetch resolves -- wait for real ingested content, not just the shell,
+  // before snapshotting the page.
+  await expect(page.getByText("checkout").first()).toBeVisible({ timeout: 10_000 });
 
   const body = await page.locator("body").innerText();
   // The real finding globalSetup ingested: checkout -> redis, cross-AZ,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useScroll, useTransform } from "framer-motion";
 import { fetchDashboardSummary } from "./api";
 import { supabase } from "./supabaseClient";
@@ -12,17 +12,6 @@ import { TopFixesTable } from "./components/TopFixesTable";
 import { BudgetCard } from "./components/BudgetCard";
 import { AnomalyCard } from "./components/AnomalyCard";
 import { TrendProjectionCard } from "./components/TrendProjectionCard";
-import { CostsUsagePage } from "./components/CostsUsagePage";
-import { AnomaliesPage, BudgetsPage, ForecastingPage, SavingsAdvisorPage } from "./components/FeaturePages";
-import { WorkloadsPage } from "./components/WorkloadsPage";
-import { ExplorerPage } from "./components/ExplorerPage";
-import { ReportsPage } from "./components/ReportsPage";
-import { InsightsPage } from "./components/InsightsPage";
-import { AutomationsPage } from "./components/AutomationsPage";
-import { SettingsPage } from "./components/SettingsPage";
-import { TeamsPage } from "./components/TeamsPage";
-import { HistoryPage } from "./components/HistoryPage";
-import { CostGraphPage } from "./components/CostGraphPage";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { LandingPage } from "./components/LandingPage";
@@ -36,6 +25,26 @@ import { SpendByProviderCard } from "./components/SpendByProviderCard";
 import { CarbonFootprintCard } from "./components/CarbonFootprintCard";
 import { LoginPage } from "./components/LoginPage";
 import { SessionContext, type Session } from "./session";
+
+// Every sidebar page beyond Overview is its own chunk -- only Overview +
+// Sidebar are needed for first paint, so the other 14 pages shouldn't ship
+// in the initial bundle. Each import() targets one module; Vite/Rollup
+// automatically dedupes the four FeaturePages imports into a single shared
+// chunk since they all resolve to the same module specifier.
+const CostsUsagePage = lazy(() => import("./components/CostsUsagePage").then((m) => ({ default: m.CostsUsagePage })));
+const ExplorerPage = lazy(() => import("./components/ExplorerPage").then((m) => ({ default: m.ExplorerPage })));
+const WorkloadsPage = lazy(() => import("./components/WorkloadsPage").then((m) => ({ default: m.WorkloadsPage })));
+const HistoryPage = lazy(() => import("./components/HistoryPage").then((m) => ({ default: m.HistoryPage })));
+const CostGraphPage = lazy(() => import("./components/CostGraphPage").then((m) => ({ default: m.CostGraphPage })));
+const BudgetsPage = lazy(() => import("./components/FeaturePages").then((m) => ({ default: m.BudgetsPage })));
+const AnomaliesPage = lazy(() => import("./components/FeaturePages").then((m) => ({ default: m.AnomaliesPage })));
+const ForecastingPage = lazy(() => import("./components/FeaturePages").then((m) => ({ default: m.ForecastingPage })));
+const SavingsAdvisorPage = lazy(() => import("./components/FeaturePages").then((m) => ({ default: m.SavingsAdvisorPage })));
+const InsightsPage = lazy(() => import("./components/InsightsPage").then((m) => ({ default: m.InsightsPage })));
+const ReportsPage = lazy(() => import("./components/ReportsPage").then((m) => ({ default: m.ReportsPage })));
+const AutomationsPage = lazy(() => import("./components/AutomationsPage").then((m) => ({ default: m.AutomationsPage })));
+const SettingsPage = lazy(() => import("./components/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const TeamsPage = lazy(() => import("./components/TeamsPage").then((m) => ({ default: m.TeamsPage })));
 
 // Pages that need the shared dashboard-summary fetch, keyed by nav id.
 // costs/explorer/workloads fetch their own data (the full findings list,
@@ -198,23 +207,33 @@ function Dashboard({ session, onLogout }: { session: Session; onLogout: () => vo
         <AnimatePresence mode="wait">
           {active === "costs" ? (
             <motion.div key="costs" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <CostsUsagePage />
+              <Suspense fallback={<Skeleton />}>
+                <CostsUsagePage />
+              </Suspense>
             </motion.div>
           ) : active === "explorer" ? (
             <motion.div key="explorer" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <ExplorerPage />
+              <Suspense fallback={<Skeleton />}>
+                <ExplorerPage />
+              </Suspense>
             </motion.div>
           ) : active === "workloads" ? (
             <motion.div key="workloads" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <WorkloadsPage />
+              <Suspense fallback={<Skeleton />}>
+                <WorkloadsPage />
+              </Suspense>
             </motion.div>
           ) : active === "history" ? (
             <motion.div key="history" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <HistoryPage />
+              <Suspense fallback={<Skeleton />}>
+                <HistoryPage />
+              </Suspense>
             </motion.div>
           ) : active === "cost-graph" ? (
             <motion.div key="cost-graph" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <CostGraphPage />
+              <Suspense fallback={<Skeleton />}>
+                <CostGraphPage />
+              </Suspense>
             </motion.div>
           ) : active in DATA_PAGES ? (
             <motion.div key={active} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -224,7 +243,7 @@ function Dashboard({ session, onLogout }: { session: Session; onLogout: () => vo
                   Couldn't load dashboard data: {error}
                 </div>
               )}
-              {data && DATA_PAGES[active](data)}
+              {data && <Suspense fallback={<Skeleton />}>{DATA_PAGES[active](data)}</Suspense>}
             </motion.div>
           ) : (
             <motion.div key="overview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
