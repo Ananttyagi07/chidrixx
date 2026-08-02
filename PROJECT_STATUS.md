@@ -1,6 +1,6 @@
 # chidrixx — Project & Technical Status (Universal Reference)
 
-_Last updated: 2026-08-02 (real Supabase auth, self-service team invites, a committed Playwright E2E suite, CI coverage for controlplane/, GHCR packages made public, frontend code-splitting, closed-loop recommendation outcome tracking, and a real Groq-backed grounded chat assistant)_
+_Last updated: 2026-08-02 (real Supabase auth, self-service team invites, a committed Playwright E2E suite, CI coverage for controlplane/, GHCR packages made public, frontend code-splitting, closed-loop recommendation outcome tracking, a real Groq-backed grounded chat assistant, and a real anomaly root-cause narrator)_
 
 This is the single, complete picture of chidrixx: what's real and
 verified, what's explicitly not built (and why), what's actually left to
@@ -9,10 +9,10 @@ underneath every claim: which file, which function, which DB column,
 which test, which command proved it. Nothing here is recalled from
 memory; every number was measured against the actual repository at the
 commit this file was last updated against (`git log -1` at write time:
-`363ea2d`, "controlplane: real grounded chat assistant (Groq-backed,
-tool-calling)"), by running `go build`, `go test`, `gofmt -l`,
+`568727b`, "controlplane: real anomaly root-cause narrator
+(Groq-backed)"), by running `go build`, `go test`, `gofmt -l`,
 `find`/`wc`/`grep`, `docker build`, `helm lint`/`template`, and live
-Playwright/curl passes — plus, for the two AI features, a live manual
+Playwright/curl passes — plus, for the three AI features, a live manual
 pass against the real Groq API and a real browser — against both a real
 k3d cluster and a real running `controlplane` server, not written and
 assumed to work.
@@ -211,7 +211,7 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
   `bpf/flow_cgroup.o`) and `go:embed`'d — `go build`/`go test` need no
   Node install. 15 sidebar pages total (full list in §4).
 
-### 3.2 API routes — 13 real endpoints + the static SPA shell route, exact
+### 3.2 API routes — 14 real endpoints + the static SPA shell route, exact
 
 | Route | Method(s) | Auth | Handler |
 |---|---|---|---|
@@ -224,7 +224,8 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
 | `/api/v1/workload-growth` | GET | `requireSession` | `handleWorkloadGrowth` |
 | `/api/v1/outcomes` **(new)** | GET | `requireSession` | `handleOutcomes` |
 | `/api/v1/outcomes/apply` **(new)** | POST | `requireSession` | `handleMarkOutcomeApplied` |
-| `/api/v1/chat` **(new)** | POST | `requireSession` | `handleChat` (503 if `GROQ_API_KEY` unset) |
+| `/api/v1/chat` | POST | `requireSession` | `handleChat` (503 if `GROQ_API_KEY` unset) |
+| `/api/v1/anomalies/narrate` **(new)** | POST | `requireSession` | `handleNarrateAnomaly` (503 if `GROQ_API_KEY` unset) |
 | `/api/v1/auth/me` | GET | `requireSession` | `handleMe` |
 | `/api/v1/auth/login` | POST | none (that's the point) | `handleLogin` |
 | `/api/v1/auth/logout` | POST | none | `handleLogout` |
@@ -257,7 +258,7 @@ column name" errors swallowed) except the `settings` table rebuild,
 which detects the old schema via `sqlite_master.sql` and does a real
 `CREATE new → INSERT SELECT → DROP → RENAME` inside one transaction.
 
-### 3.4 Control plane file-by-file (24 files)
+### 3.4 Control plane file-by-file (26 files)
 
 | File | Role |
 |---|---|
@@ -284,7 +285,9 @@ which detects the old schema via `sqlite_master.sql` and does a real
 | `outcome_api.go` **(new)** | `handleOutcomes` (GET), `handleMarkOutcomeApplied` (POST). |
 | `groq.go` **(new)** | `GroqClient` — OpenAI-compatible chat-completions HTTP client, no SDK dependency. |
 | `chat_tools.go` **(new)** | `buildChatTools` — the 5 real tenant-scoped tools; `parseLenientInt` (works around a real Groq/Llama schema-validation quirk, see §3.12). |
-| `chat_api.go` **(new)** | `handleChat`, `runChatLoop` (the tool-calling loop, bounded retry). |
+| `chat_api.go` | `handleChat`, `runChatLoop` (the tool-calling loop, bounded retry). |
+| `anomaly_narrator.go` **(new)** | `narrateAnomaly` — single-completion (no tool-calling) explanation of one real, already-computed `Anomaly`. |
+| `anomaly_narrator_api.go` **(new)** | `handleNarrateAnomaly` — `POST /api/v1/anomalies/narrate`, re-derives the anomaly fresh server-side. |
 
 ### 3.5 Control plane dependencies (`go.mod`, exact versions)
 
@@ -295,7 +298,7 @@ own transitive requirements (libc, mathutil, memory, bigfft, etc.) plus
 dependencies — it's a plain `net/http` client against Groq's
 OpenAI-compatible REST API, not an SDK.
 
-### 3.6 Control plane test inventory — 106 test functions across 17 files
+### 3.6 Control plane test inventory — 112 test functions across 18 files
 
 | File | Approx. tests | Covers |
 |---|---|---|
@@ -312,8 +315,9 @@ OpenAI-compatible REST API, not an SDK.
 | `invite_test.go` + `invite_api_test.go` | 14 | Upsert-replace semantics, role validation, revoke, join-via-invite, tenant isolation, admin-only-including-GET |
 | `outcome_test.go` + `outcome_api_test.go` | 14 | Shown/freeze-on-applied upsert, idempotent apply, real cost-after measurement (both "fixed" and "flow gone" cases), tenant isolation |
 | `chat_test.go` | 12 | Groq client against a fake server, the tool-calling loop (success/unknown-tool/max-rounds/retry), tenant-scoped tool isolation, `parseLenientInt`, the full HTTP handler |
+| `anomaly_narrator_test.go` | 6 | Prompt grounding (with/without a real likely cause), 503/404/tenant-isolation at the API layer |
 
-Run: `cd controlplane && go test ./...` — **all 106 passing** (re-verified
+Run: `cd controlplane && go test ./...` — **all 112 passing** (re-verified
 2026-08-02), ~13–34s wall time depending on cache (several tests use
 real 1.1s sleeps to get distinct `reported_at` second-granularity
 timestamps).
@@ -565,6 +569,35 @@ of an off-topic question. The committed E2E suite adds a hermetic test
 proving the honest-503 path (no `GROQ_API_KEY` in CI, matching the
 Supabase-auth pattern of keeping real secrets out of the committed
 suite) — not a live Groq call in CI.
+
+### 3.13 Real anomaly root-cause narrator (`anomaly_narrator.go`/`anomaly_narrator_api.go`)
+
+The third AI item from the same session's build order (outcome
+tracking → chat assistant → this). Turns one already-computed real
+`Anomaly` (previous/current cost, growth ratio, and the optional real
+correlated deploy event from §3.7's root-cause correlation) into a short
+plain-English explanation — a single Groq completion, not a tool-calling
+loop, since all the real data is already known and there's nothing to
+look up. New `POST /api/v1/anomalies/narrate` (`{cluster_id}` →
+`{narrative}`), re-derives the anomaly fresh from real data server-side
+rather than trusting client-supplied numbers. New "Explain this" button
+on `AnomalyCard.tsx`, on-demand per anomaly — not run automatically for
+every anomaly on every dashboard load, which would mean an LLM call per
+anomaly per page view. The system prompt explicitly forbids upgrading
+"likely cause" correlation into causation and forbids inventing any
+figure not present in the input.
+
+Verified: 6 new Go tests (prompt actually contains the real cluster ID
+and real deploy event; the honest "none found" case when there's no
+correlated event; 503/404/tenant-isolation at the API layer, same
+`fakeGroq` pattern). Live manual pass against the real Groq API: a real
+2-snapshot cost jump (₹10→₹60, 6x) with a real correlated deploy event
+(`ScalingReplicaSet`, 2→10 replicas) produced a correctly grounded,
+correctly hedged explanation, confirmed in a real browser (screenshot
+captured). E2E suite adds the same hermetic honest-503 test as the chat
+assistant (direct API call — `globalSetup.ts` only ingests one snapshot,
+so there's no real 2-snapshot anomaly to click through in the committed
+suite).
 
 ---
 
@@ -873,8 +906,8 @@ original self-hosted CLI path, real self-service team invites, real
 root-cause correlation, real $ optimization recommendations, a real
 historical trend-change view, a real cost topology graph, a real
 predictive driver, real closed-loop recommendation-outcome tracking, and
-a real Groq-backed grounded chat assistant — not a static mockup or a
-single-shared-secret toy.
+a real Groq-backed grounded chat assistant, and a real anomaly
+root-cause narrator — not a static mockup or a single-shared-secret toy.
 
 `controlplane/` now has the same CI coverage `agent/` always had (§6,
 seven jobs total: build/test/Docker/Helm for both modules plus a real
@@ -887,8 +920,9 @@ deployment is blocked on a real, non-technical wall (India's GCP billing
 deposit requirement — a money decision, deliberately not pushed through
 for a demo); a deeper forecasting model is a real engineering-investment
 decision, not an oversight; GTM/business work is explicitly
-deprioritized per prior direction. The two AI features (outcome
-tracking, the chat assistant) are deliberately sequenced — the data
-layer first, then a model grounded against it — with the honest data
-gap named directly in §9's future-vision section: there's no proprietary
-outcome dataset yet, only the schema now capturing it going forward.
+deprioritized per prior direction. The three AI features (outcome
+tracking, the chat assistant, the anomaly narrator) are deliberately
+sequenced — the data layer first, then a model grounded against it —
+with the honest data gap named directly in §9's future-vision section:
+there's no proprietary outcome dataset yet, only the schema now
+capturing it going forward.
