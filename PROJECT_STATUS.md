@@ -1,22 +1,24 @@
 # chidrixx — Project & Technical Status (Universal Reference)
 
-_Last updated: 2026-08-02 (real Supabase auth, self-service team invites, a committed Playwright E2E suite, CI coverage for controlplane/, GHCR packages made public, frontend code-splitting, closed-loop recommendation outcome tracking, a real Groq-backed grounded chat assistant, a real anomaly root-cause narrator, a real deeper forecasting model, and a real live-deployment performance investigation cutting dashboard load from 37s to under 6s)_
+_Last updated: 2026-08-03 (full re-verification pass: fresh line/file/test counts throughout, corrected a stale agent/ line count, fixed a real internal contradiction on bundle code-splitting, refreshed live-cluster stats against a freshly pulled+integrity-checked database copy — 2,229,443 real rows, Helm revision 8, 24 real outcome-tracking rows — and corrected a stale "zero rows" claim about the outcome dataset)_
 
 This is the single, complete picture of chidrixx: what's real and
 verified, what's explicitly not built (and why), what's actually left to
 do, and — merged into this same file — the exhaustive engineering detail
 underneath every claim: which file, which function, which DB column,
 which test, which command proved it. Nothing here is recalled from
-memory; every number was measured against the actual repository at the
-commit this file was last updated against (`git log -1` at write time:
-`2f650df`, "controlplane: real performance investigation and fix — 37s
-to under 6s"), by running `go build`, `go test`, `go test -race`,
-`gofmt -l`, `find`/`wc`/`grep`, `docker build`, `helm lint`/`template`,
-and live Playwright/curl passes — plus, for the AI features, the
-forecasting model, and the performance investigation, a live manual pass
-against real production data (including `kubectl top`, `EXPLAIN QUERY
-PLAN`, and pulled copies of the actual live database) — all against both
-a real k3d cluster and a real running `controlplane`
+memory; every number in this update was freshly re-measured against the
+actual repository and the actual live deployment, not carried forward
+from an earlier pass — commit at write time: `git log -1` →
+`3de42ca`, "docs: update PROJECT_STATUS.md for the live performance
+investigation" (this pass's own edits are docs-only, no new commit
+needed until they land). Verified by running `go build`, `go test`,
+`go test -race`, `gofmt -l`, `find`/`wc`/`grep`, `docker build`, `helm
+lint`/`template`, live Playwright/curl passes, and — for the live-
+cluster claims specifically — `kubectl top`, `EXPLAIN QUERY PLAN`, and a
+fresh `kubectl cp` + `PRAGMA integrity_check` pull of the actual
+production database — all against both a real k3d cluster and a real
+running `controlplane`
 server, not written and
 assumed to work.
 
@@ -35,22 +37,28 @@ Two components, two Go modules, plus a frontend:
 
 ```
 chidrixx/
-├── agent/               module `chidrixx`            — 4,089 lines Go (excl. tests), 14 files
+├── agent/               module `chidrixx`            — 3,159 lines Go (excl. tests), 14 files
 │   └── cmd/
 │       ├── kharcha/     the eBPF agent binary          — 12 test files, 26 test functions
 │       └── loadgen/     load-test traffic generator (no tests)
-├── controlplane/        module `chidrixx-controlplane` — 4,104 lines Go (excl. tests), 16 files
-│   └── web/             React/Vite/TS dashboard SPA    — 4,044 lines TS/TSX, 32 .tsx + 9 .ts files
+├── controlplane/        module `chidrixx-controlplane` — 4,315 lines Go (excl. tests), 29 files
+│   ├── web/             React/Vite/TS dashboard SPA    — 4,824 lines TS/TSX, 35 .tsx + 10 .ts files
+│   └── e2e/             committed Playwright E2E suite — 10 .ts files (§3.10)
 ├── bpf/                 flow_cgroup.c + compiled flow_cgroup.o (committed binary, go:embed'd)
 ├── pricebook/            aws.yaml, gcp.yaml — real cited price data
 ├── deploy/helm/          kharcha/ + controlplane/ charts, 18 template/value files total
 ├── test/load/            10k-concurrent-flow load harness + its own Dockerfile
-└── .github/workflows/   ci.yml — the only CI workflow (agent/ only — see §6)
+└── .github/workflows/   ci.yml — 7 jobs, both modules (§6)
 ```
 
-Total: **~12,200 lines** of hand-written Go + TypeScript across both
+Total: **~12,300 lines** of hand-written Go + TypeScript across both
 modules and the frontend (not counting vendored react-bits `.jsx`/`.css`
-files, which are third-party, installed via the real `shadcn` CLI).
+files, which are third-party, installed via the real `shadcn` CLI; not
+counting the separate 10-file E2E suite). All four counts above were
+re-measured directly against the current tree while writing this
+update, not carried forward from an earlier pass — the agent/ count in
+particular corrects a stale figure from a previous version of this
+document.
 
 - **`agent/`** (module `chidrixx`) — the eBPF agent, one per cluster (DaemonSet).
 - **`controlplane/`** (module `chidrixx-controlplane`) — optional multi-cluster
@@ -725,13 +733,17 @@ a bug fix — left for a separate call if it matters later.
 
 ## 4. Frontend — component inventory
 
-34 `.tsx` files + 11 `.ts` files, 4,597 lines. React 18 + Vite 5 +
+35 `.tsx` files + 10 `.ts` files (excluding `.d.ts`), 4,824 lines in
+`src/` — re-counted directly against the tree, not carried forward from
+an earlier session's number. Separately, `e2e/` holds 10 more `.ts`
+files (the committed Playwright suite, §3.10 — a distinct concern from
+the app's own source, not counted here). React 18 + Vite 5 +
 TypeScript + Tailwind + Recharts + Framer Motion + GSAP. No component
 library — every visual element (donut chart, trend chart, cost graph,
 force layout) is hand-built, matching the project's stated preference
 for owning its own rendering rather than pulling in a chart/graph
-dependency. Every sidebar page beyond Overview is now its own code-split
-chunk via `React.lazy()`/`Suspense` (see §8's now-closed bundle-size item).
+dependency. Every sidebar page beyond Overview is its own code-split
+chunk via `React.lazy()`/`Suspense` (§8's now-closed bundle-size item).
 
 ### 4.1 Pages (sidebar-routed, 16 total, verified against `Sidebar.tsx`)
 
@@ -739,47 +751,44 @@ Overview (default), **Assistant**, Insights, Explorer, Workloads, Cost
 Graph, Teams, Costs & Usage, Budgets, Savings Advisor, Forecasting,
 Anomalies, History, Reports, Automations, Settings.
 
-### 4.2 New components this session
+### 4.2 Components added across this document's sessions (cumulative, file-verified)
 
 | File | Role |
 |---|---|
-| `CostGraphPage.tsx` | Node-link topology, builds nodes/edges client-side from `/api/v1/findings` (no new backend call) |
-| `graphLayout.ts` | Dependency-free force-relaxation layout |
+| `AssistantPage.tsx` | The real Groq-backed chat assistant UI (§3.11) — message list, suggestion chips, calls `POST /api/v1/chat` |
+| `DeepForecastCard.tsx` | The real backtested-model forecast UI (§3.14) — per-cluster selector, calls `GET /api/v1/forecast` |
+| `CostGraphPage.tsx` + `graphLayout.ts` | Node-link topology; dependency-free force-relaxation layout, builds nodes/edges client-side from `/api/v1/findings` |
 | `HistoryPage.tsx` | Fetches `/api/v1/workload-growth`, renders ranked list + per-workload sparkline + correlated-event note |
-| `TeamsPage.tsx` | Fetches/mutates `/api/v1/teams`, renders spend-by-team + namespace-ownership CRUD form |
-| `PredictiveDriverCard.tsx` | Fetches `/api/v1/workload-growth`, reuses `holtForecast()` from `forecast.ts` to determine trend direction, shows the top-growth workload as "likely driver" only when trending up |
-| `LoginPage.tsx` | Real username/password form → `/api/v1/auth/login` |
+| `TeamsPage.tsx` | Fetches/mutates `/api/v1/teams` (spend-by-team + namespace-ownership CRUD) **and** `/api/v1/invites` (§3.9's `MembersCard` — admin-only invite form + pending-invite table) |
+| `PredictiveDriverCard.tsx` | Fetches `/api/v1/workload-growth`, reuses `holtForecast()` from `forecast.ts` to determine trend direction |
+| `LoginPage.tsx` | Real Supabase `signUp`/`signInWithPassword` (§3.9), sign-in/sign-up toggle, honest "check your email" pending state |
+| `apiFetch.ts` | Single chokepoint attaching a Supabase bearer token to every authenticated frontend call |
+| `supabaseClient.ts` | Real `createClient(url, publishableKey)`, fails loudly if env vars are missing rather than silently degrading |
+| `session.ts` | `SessionContext`/`Session` type shared across the app |
 
-### 4.3 Modified components this session
-
-`AnomalyCard.tsx` (renders `likely_cause` correlation note),
-`TopFixesTable.tsx` (new "Potential savings" column), `App.tsx`
-(potentialSavings stat now sums real savings not full cost; session
-state machine: `checking → landing → login → authed`), `Sidebar.tsx`
-(real username/role + working Log out button, replacing the old
-hardcoded "Admin / Shared token access"), `SettingsPage.tsx`,
-`BudgetCard.tsx` (role-gated edit UI), `FeaturePages.tsx`
-(`ForecastingPage` now also renders `PredictiveDriverCard`),
-`TrendProjectionCard.tsx` (Holt's method, replacing plain OLS),
-`types.ts` (every new wire shape: `DeployEvent`/`TeamOwnership`/
-`TeamSpend`/`WorkloadGrowth`/`WorkloadCostPoint`, plus
-`savings_low_inr`/`savings_high_inr` on `Finding`).
-
-### 4.4 Frontend build output (measured, current)
+### 4.3 Frontend build output (measured, current — rebuilt as part of this update)
 
 ```
-dist/assets/index-*.js    930.67 kB  (277.29 kB gzip)
-dist/assets/index-*.css    19.62 kB  (5.35 kB gzip)
+dist/assets/index-*.js               1,118.04 kB  (329.24 kB gzip)
+dist/assets/index-*.css                 20.12 kB  (5.47 kB gzip)
+dist/assets/FeaturePages-*.js             8.58 kB  (3.08 kB gzip)
+dist/assets/TeamsPage-*.js                7.83 kB  (2.09 kB gzip)
+dist/assets/CostGraphPage-*.js            5.88 kB  (2.42 kB gzip)
++ 8 more page chunks, 1.5-4kB each
 ```
 
-Single JS bundle, no code-splitting — Vite's own build warns about this
-(>500kB chunk). Punch-list item, unchanged this session (§8).
+Code-split (§8, closed): only Overview + Sidebar ship in the main
+bundle's *page* code — the main chunk is still large because it's
+dominated by vendor libraries (React, Framer Motion, GSAP, Recharts,
+Supabase client), not app page code; vendor-chunk splitting would be the
+next lever if this needs to go further (not attempted, wasn't asked).
 
-### 4.5 Frontend dependencies (`package.json`, exact)
+### 4.4 Frontend dependencies (`package.json`, exact)
 
-Runtime: `@fontsource-variable/geist`, `framer-motion`, `gsap`, `motion`,
-`react` + `react-dom` (18.x), `recharts`. Dev: the standard
-Vite+React+TS+Tailwind toolchain, nothing exotic. Vendored (not in
+Runtime: `@fontsource-variable/geist`, `@supabase/supabase-js`,
+`framer-motion`, `gsap`, `motion`, `react` + `react-dom` (18.x),
+`recharts`. Dev: `@playwright/test` (§3.10's E2E suite) plus the
+standard Vite+React+TS+Tailwind toolchain. Vendored (not in
 `package.json`, committed as source): `DecryptedText.jsx`,
 `RotatingText.jsx` + `.css`, `VariableProximity.jsx` + `.css` —
 react-bits components pulled in via the real `shadcn` CLI, not
@@ -819,18 +828,34 @@ fields), `templates/deployment.yaml` (`CHIDRIXX_ADMIN_USER`/
 ingest token + the `create-tenant`/`create-user`/`create-token` exec
 commands), `templates/_helpers.tpl`.
 
-### 5.2 Live cluster state (k3d, as of this document)
+### 5.2 Live cluster state (k3d, as of this document — re-verified 2026-08-02 post-performance-fix)
 
 - Namespace `chidrixx`: `chidrixx-controlplane` Deployment (Helm
-  revision 7), image `chidrixx-controlplane:dev`, PVC-backed SQLite.
-- Namespace `kharcha`: `kharcha-kharcha` DaemonSet (Helm revision 5),
-  image `chidrixx-agent:dev`, real ingest token issued via
-  `create-token` and stored in the `kharcha-controlplane-token` secret.
-- Real production data present: 2+ clusters, 170+ findings, real
-  `spend_by_team` (`Unassigned` — no namespace mappings configured on
-  the live tenant yet), real cloud/region on the newer cluster's
-  findings, `unknown`/`unknown` on the pre-upgrade cluster's (honest
-  fallback, not broken).
+  revision **8**), image `chidrixx-controlplane:dev` (rebuilt and
+  `k3d image import`ed several times today — no registry push needed
+  for local iteration), PVC-backed SQLite, `GROQ_API_KEY` wired via the
+  `chidrixx-controlplane-groq-key` secret (§3.11).
+- Namespace `kharcha`: `kharcha-kharcha` DaemonSet (Helm revision 5,
+  unchanged today), image `chidrixx-agent:dev`, real ingest token issued
+  via `create-token` and stored in the `kharcha-controlplane-token`
+  secret.
+- **Real production data, directly queried from a pulled+integrity-
+  checked copy of the live database, not estimated**: `flow_aggregate`
+  has **2,229,443 real rows** (never pruned, by design — see §3.3 and
+  §3.15's performance investigation, triggered by this exact growth).
+  `chidrixx-lab` has 5,591 distinct real snapshots spanning ~53 hours
+  (~2.2 days) of continuous real ingestion; `chidrixx-lab-2` has stayed
+  at 5 snapshots since early in the session (its test agent was never
+  kept running long-term — an idle fixture, not a bug). 1 real tenant,
+  2 real admin users. 24 rows in `recommendation_outcomes` (§3.10) from
+  real dashboard loads. `journal_mode` confirmed `wal` on the live file
+  (`PRAGMA journal_mode` queried directly against the pulled copy).
+  Real `spend_by_team` still shows `Unassigned` (no namespace mappings
+  configured on the live tenant yet) — a real gap in configuration, not
+  a bug.
+- The live database file itself is ~550MB (main file) + a few MB of
+  WAL — consistent with real, continuous ingestion over multiple days,
+  not a synthetic fixture.
 
 ---
 
@@ -852,14 +877,15 @@ ones giving `controlplane/` equal coverage:
    `Dockerfile`. Agent only.
 3. `helm-lint`: `helm lint` + `helm template` against
    `deploy/helm/kharcha` **only**.
-4. `build-and-test-controlplane` **(new)** (`working-directory:
+4. `build-and-test-controlplane` (`working-directory:
    controlplane`): the same `gofmt`/`go vet`/`go build`/`go test`
-   sequence as job 1, covering all 58+ control-plane test functions.
-5. `docker-build-controlplane` **(new)**: builds `chidrixx-controlplane:ci`
+   sequence as job 1, covering all 130 control-plane test functions
+   (§3.6).
+5. `docker-build-controlplane`: builds `chidrixx-controlplane:ci`
    from `controlplane/Dockerfile`.
-6. `helm-lint-controlplane` **(new)**: `helm lint` + `helm template`
+6. `helm-lint-controlplane`: `helm lint` + `helm template`
    against `deploy/helm/controlplane`.
-7. `e2e-controlplane` **(new)**: installs Node 20 + runs `npm ci` in
+7. `e2e-controlplane`: installs Node 20 + runs `npm ci` in
    `controlplane/web`, then `npm run test:e2e` — the real Playwright
    suite from §3.10, on every push now instead of only when someone
    remembers to run it locally. Relies on the Google Chrome
@@ -886,15 +912,22 @@ E2E coverage `agent/` always had.
 These are honest placeholders — visually present where relevant, clearly
 labeled, never filled with invented numbers:
 
-- **A genuine ML/time-series forecast beyond Holt's method** — §3.7's
-  Holt model is a real classical technique with fitted parameters and a
-  computed confidence interval, but it's still not a neural/ARIMA-grade
-  forecast, and it still can't be calendar-aligned (chidrixx's data is
-  cumulative snapshots, not fixed time windows).
+- **A neural/ARIMA/Prophet-grade time-series forecast** — §3.14's
+  backtested Holt-vs-damped-Holt model is a real, measured improvement
+  over plain Holt (§3.7), but it's still classical exponential
+  smoothing, not a neural sequence model, and it still can't be
+  calendar-aligned (chidrixx's data is cumulative snapshots, not fixed
+  time windows) — deliberately, since the real production data doesn't
+  span enough calendar days to honestly fit a seasonal component yet
+  (checked directly, not assumed — see §3.14/§3.15).
 - **No automated release/versioning** — both charts are still `0.1.0`;
   there's no CI job that bumps versions or cuts releases automatically.
-- **No CI coverage for `controlplane/`** — see §6. Listed here too since
-  it's a real absence, not just a technical-debt line item.
+- **A covering index or retention pruning for `flow_aggregate`** — the
+  table is never pruned by design and now has 2.2M+ real rows (§3.15,
+  §5.2); the performance fix reduced redundant work per request but
+  didn't add either of these, since both are bigger decisions (a schema
+  migration; a real data-retention policy) than the bug fix that
+  prompted looking at this at all.
 
 ---
 
@@ -1008,10 +1041,15 @@ across component comments:
 - **A real second-cloud agent deployment is blocked on a real money
   decision** (India's GCP billing deposit requirement), not a technical
   gap — see §8 item 1. Deliberately not pushed through for a demo.
-- **The chat assistant has no proprietary outcome data to fine-tune on
-  yet** — §3.11's `recommendation_outcomes` table exists specifically to
-  start capturing it, but has zero real rows from actual production
-  usage today. See §9.
+- **The chat assistant has no proprietary *outcome* data to fine-tune on
+  yet** — §3.11's `recommendation_outcomes` table is live and real (24
+  real rows from real dashboard loads on the live cluster, verified by
+  direct query against a pulled copy of the production database), but
+  0 of those 24 have `applied_at` set — no operator has clicked "Mark as
+  applied" on the live cluster yet, so the "did this fix actually work"
+  signal the whole feature exists to eventually train on is still
+  empty. The *shown* tracking works; the *outcome* dataset doesn't
+  exist yet. See §9.
 
 ---
 
@@ -1038,7 +1076,12 @@ The deeper forecasting model (§3.14) is genuinely scoped to what the
 real production data volume supports — checked first by pulling the
 actual live database, not assumed — real backtested model selection
 between plain and damped Holt, not an invented seasonal model the data
-can't honestly back yet.
+can't honestly back yet. A real live-production performance
+investigation (§3.15) cut the dashboard's slowest real request from
+20-40+ seconds to ~5.8 seconds, root-caused through direct live
+measurement (`kubectl top`, a pulled+integrity-checked database copy,
+`EXPLAIN QUERY PLAN`) rather than guessing, catching a genuine latent
+concurrency bug along the way.
 
 What's genuinely left, in priority order (§8): a real second-cloud agent
 deployment is blocked on a real, non-technical wall (India's GCP billing
