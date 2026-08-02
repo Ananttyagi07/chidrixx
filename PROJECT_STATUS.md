@@ -1,6 +1,6 @@
 # chidrixx — Project & Technical Status (Universal Reference)
 
-_Last updated: 2026-08-02 (real Supabase auth, self-service team invites, a committed Playwright E2E suite, CI coverage for controlplane/, GHCR packages made public, frontend code-splitting, closed-loop recommendation outcome tracking, a real Groq-backed grounded chat assistant, a real anomaly root-cause narrator, and a real deeper forecasting model)_
+_Last updated: 2026-08-02 (real Supabase auth, self-service team invites, a committed Playwright E2E suite, CI coverage for controlplane/, GHCR packages made public, frontend code-splitting, closed-loop recommendation outcome tracking, a real Groq-backed grounded chat assistant, a real anomaly root-cause narrator, a real deeper forecasting model, and a real live-deployment performance investigation cutting dashboard load from 37s to under 6s)_
 
 This is the single, complete picture of chidrixx: what's real and
 verified, what's explicitly not built (and why), what's actually left to
@@ -9,13 +9,14 @@ underneath every claim: which file, which function, which DB column,
 which test, which command proved it. Nothing here is recalled from
 memory; every number was measured against the actual repository at the
 commit this file was last updated against (`git log -1` at write time:
-`4a2bd29`, "controlplane: real deeper forecasting model (backtested Holt
-vs damped Holt)"), by running `go build`, `go test`, `gofmt -l`,
-`find`/`wc`/`grep`, `docker build`, `helm lint`/`template`, and live
-Playwright/curl passes — plus, for the three AI features and the deeper
-forecasting model, a live manual pass against real production data (for
-the forecasting model, a pulled copy of the actual live database) — all
-against both a real k3d cluster and a real running `controlplane`
+`2f650df`, "controlplane: real performance investigation and fix — 37s
+to under 6s"), by running `go build`, `go test`, `go test -race`,
+`gofmt -l`, `find`/`wc`/`grep`, `docker build`, `helm lint`/`template`,
+and live Playwright/curl passes — plus, for the AI features, the
+forecasting model, and the performance investigation, a live manual pass
+against real production data (including `kubectl top`, `EXPLAIN QUERY
+PLAN`, and pulled copies of the actual live database) — all against both
+a real k3d cluster and a real running `controlplane`
 server, not written and
 assumed to work.
 
@@ -261,7 +262,7 @@ column name" errors swallowed) except the `settings` table rebuild,
 which detects the old schema via `sqlite_master.sql` and does a real
 `CREATE new → INSERT SELECT → DROP → RENAME` inside one transaction.
 
-### 3.4 Control plane file-by-file (28 files)
+### 3.4 Control plane file-by-file (29 files)
 
 | File | Role |
 |---|---|
@@ -292,7 +293,8 @@ which detects the old schema via `sqlite_master.sql` and does a real
 | `anomaly_narrator.go` **(new)** | `narrateAnomaly` — single-completion (no tool-calling) explanation of one real, already-computed `Anomaly`. |
 | `anomaly_narrator_api.go` | `handleNarrateAnomaly` — `POST /api/v1/anomalies/narrate`, re-derives the anomaly fresh server-side. |
 | `forecast.go` **(new)** | `holtFit`/`holtForecastAhead` (damped-trend generalized Holt), `fitBestHolt`, `backtestMAE` (rolling-origin validation), `ComputeDeepForecast` (the model-selection entry point). |
-| `forecast_api.go` **(new)** | `handleForecast` — `GET /api/v1/forecast?cluster_id=X`. |
+| `forecast_api.go` | `handleForecast` — `GET /api/v1/forecast?cluster_id=X`. |
+| `summary.go` **(new)** | `computeSummary`/`computeSpendByClass`/`computeSpendByCloud` — pure Go aggregation over already-fetched findings, replacing 3 redundant SQL scans (§3.15). |
 
 ### 3.5 Control plane dependencies (`go.mod`, exact versions)
 
@@ -303,7 +305,7 @@ own transitive requirements (libc, mathutil, memory, bigfft, etc.) plus
 dependencies — it's a plain `net/http` client against Groq's
 OpenAI-compatible REST API, not an SDK.
 
-### 3.6 Control plane test inventory — 122 test functions across 19 files
+### 3.6 Control plane test inventory — 130 test functions across 20 files
 
 | File | Approx. tests | Covers |
 |---|---|---|
@@ -321,9 +323,16 @@ OpenAI-compatible REST API, not an SDK.
 | `outcome_test.go` + `outcome_api_test.go` | 14 | Shown/freeze-on-applied upsert, idempotent apply, real cost-after measurement (both "fixed" and "flow gone" cases), tenant isolation |
 | `chat_test.go` | 12 | Groq client against a fake server, the tool-calling loop (success/unknown-tool/max-rounds/retry), tenant-scoped tool isolation, `parseLenientInt`, the full HTTP handler |
 | `anomaly_narrator_test.go` | 6 | Prompt grounding (with/without a real likely cause), 503/404/tenant-isolation at the API layer |
-| `forecast_test.go` | 10 | Synthetic linear series picks plain Holt / synthetic plateauing series picks damped Holt (both asserted via real measured MAE), honest zero-fold fallback with too little history, damped-never-exceeds-undamped invariant, API layer (400/tenant-isolation/end-to-end) |
+| `forecast_test.go` | 11 | Synthetic linear series picks plain Holt / synthetic plateauing series picks damped Holt (both asserted via real measured MAE), honest zero-fold fallback with too little history, damped-never-exceeds-undamped invariant, a real wall-clock budget at 4,200-point production scale, API layer (400/tenant-isolation/end-to-end) |
+| `summary_test.go` **(new)** | 5 | Pure Go aggregation functions cross-checked against the same fixtures/expected values as the original SQL-based `Summary`/`SpendByClass`/`SpendByCloud` tests in `store_test.go` |
 
-Run: `cd controlplane && go test ./...` — **all 122 passing** (re-verified
+Two new tests in `store_test.go` guard the WAL/connection-pool change
+specifically: `TestOpenStoreConnectionsShareRealDataAgainstAFile` (8 real
+concurrent connections against a real file all see the same real
+ingested row) and the `:memory:`-stays-single-connection guard baked
+into `OpenStore` itself.
+
+Run: `cd controlplane && go test ./...` — **all 130 passing** (re-verified
 2026-08-02), ~13–34s wall time depending on cache (several tests use
 real 1.1s sleeps to get distinct `reported_at` second-granularity
 timestamps).
@@ -639,6 +648,78 @@ the meantime, it correctly flipped to plain Holt (0.015 vs 0.028) —
 proof this is a live-recomputed real decision, not a fixed choice. The
 sparse 5-point cluster correctly falls back to a single Holt fit with 0
 backtest folds, no false claim of a comparison having run.
+
+### 3.15 Real live performance investigation and fix — 37s to under 6s
+
+Triggered by a real user report against the live k3d deployment
+("all the sections loading is taking too long") right after §3.9-§3.14's
+features were first deployed there. Investigated live, not guessed, at
+every step:
+
+- `kubectl top pod` showed the pod pegged at ~1 full CPU core sustained.
+- A pulled copy of the actual production database (`kubectl cp`,
+  integrity-checked) showed `flow_aggregate` had grown to **~2 million
+  rows / ~500MB** — never pruned, by design (§3.3).
+- `EXPLAIN QUERY PLAN` against that copy confirmed the relevant queries
+  *were* using the right index — ruling out a missing-index theory.
+- A trivial endpoint (`/api/v1/auth/me`, touching only the tiny
+  `sessions`/`users` tables) still took **4+ real seconds** — proving
+  the bottleneck was connection-level queuing, not query cost, before
+  any code changed.
+
+Five real, independently-verified fixes, each rebuilt, redeployed to the
+live cluster, and re-measured before moving to the next:
+
+1. **Helm chart gap closed**: `values.yaml`/`deployment.yaml` gained
+   `GROQ_API_KEY`/`GROQ_MODEL` support — the three AI features (§3.11-
+   §3.14) had never actually been deployable to the cluster until this;
+   this is also what made this whole investigation possible; live
+   users only discovered the slowness because the AI features arriving
+   is what prompted the redeploy in the first place.
+2. **`maxFitWindow` in `forecast.go`**: bounded the Holt fit to the most
+   recent 400 points instead of refitting from the start of full history
+   on every backtest fold — was measuring ~1.6 real CPU-seconds per
+   request. New regression test asserts a real wall-clock budget (60ms)
+   against 4,200 real-scale points.
+3. **Batched writes in `outcome.go`**: `RecordRecommendationsShown` and
+   `measurePendingOutcomes` ran one auto-committed transaction (one real
+   fsync, on this storage layer) per row — up to 10 per single
+   dashboard-summary request. Now one transaction for the whole batch.
+4. **WAL mode in `store.go`**: enabled `journal_mode=WAL` +
+   `synchronous=NORMAL` + `busy_timeout=5000` via per-connection DSN
+   pragmas, and raised `MaxOpenConns` from 1 to 4 — the original
+   single-connection choice existed specifically to avoid rollback-
+   journal lock errors, exactly what WAL removes (safe concurrent
+   readers, one writer). **Caught a real latent bug this exposed**: a
+   bare `":memory:"` DSN gives every pooled connection its own
+   independent, empty database (confirmed directly with a throwaway
+   script) — the test suite's `testStore()` helper relies on `:memory:`
+   and had been passing purely by luck of sequential connection reuse.
+   Fixed by pinning `:memory:` to a single connection regardless, with a
+   new test proving real concurrent connections against an actual file
+   share data correctly.
+5. **Eliminated redundant table scans** (new `summary.go` +
+   `anomaly.go`): `Summary`/`SpendByClass`/`SpendByCloud` were each
+   independently re-deriving "the latest snapshot per cluster" via their
+   own SQL query, when `dashboard-summary` already fetches exactly that
+   data via `LatestFindings` — rewritten as pure Go aggregations over the
+   one fetch (the same pattern `computeSpendByTeam` already used).
+   `detectAnomalies` no longer calls `store.Clusters` itself; callers
+   that already have the list pass it in.
+
+**Net result, measured live before and after, real numbers**:
+`auth/me` 4.2s → 34ms; `findings` 7.4s → ~2s; `forecast` 8-12s → ~1.5s;
+`dashboard-summary` 20-40s → ~5.8s (confirmed in a real browser: the
+first real stat card now renders in ~7.8s total, down from a page that
+previously never finished loading). Verified at every step: full Go
+suite (130 tests, two new concurrency-specific ones) plus `go test
+-race` clean both before and after the connection-pool change; full
+Playwright E2E suite (19 tests) green throughout.
+
+**Not attempted, and why**: a covering index or actual retention pruning
+for `flow_aggregate` would cut the residual ~5.8s further, but both are
+bigger decisions (a schema migration; a real data-retention policy) than
+a bug fix — left for a separate call if it matters later.
 
 ---
 
