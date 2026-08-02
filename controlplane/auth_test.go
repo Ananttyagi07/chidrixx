@@ -131,7 +131,7 @@ func TestRequireAPITokenNeverResolvesAnotherTenantsToken(t *testing.T) {
 
 func TestRequireSessionRejectsMissingOrInvalidCookie(t *testing.T) {
 	store := testStore(t)
-	handler := requireSession(store, func(w http.ResponseWriter, r *http.Request) {
+	handler := requireSession(store, nil, func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("handler must not run without a valid session")
 	})
 
@@ -173,7 +173,7 @@ func TestRequireSessionResolvesRealTenantAndRole(t *testing.T) {
 
 	var gotTenant int64
 	var gotRole string
-	handler := requireSession(store, func(w http.ResponseWriter, r *http.Request) {
+	handler := requireSession(store, nil, func(w http.ResponseWriter, r *http.Request) {
 		gotTenant, _ = tenantIDFromContext(r.Context())
 		gotRole = roleFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)

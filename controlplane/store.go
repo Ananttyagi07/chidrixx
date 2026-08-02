@@ -157,6 +157,24 @@ CREATE INDEX IF NOT EXISTS idx_deploy_event_tenant_cluster_time ON deploy_event(
 		return nil, fmt.Errorf("migrate tenant_id column on flow_aggregate: %w", err)
 	}
 
+	// supabase_user_id links a users row to a real Supabase Auth identity
+	// once Supabase-backed signup shipped -- nullable, since CLI-provisioned
+	// (create-user) rows have no Supabase account at all. SQLite's
+	// ALTER TABLE ADD COLUMN can't declare UNIQUE directly, so the
+	// uniqueness constraint is a separate partial index: WHERE ... IS NOT
+	// NULL means many rows can share a NULL (every CLI-provisioned user)
+	// while still enforcing real uniqueness among the ones that do have a
+	// Supabase identity.
+	if _, err := db.Exec(`ALTER TABLE users ADD COLUMN supabase_user_id TEXT`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		db.Close()
+		return nil, fmt.Errorf("migrate supabase_user_id column: %w", err)
+	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase_user_id ON users(supabase_user_id) WHERE supabase_user_id IS NOT NULL`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("create supabase_user_id index: %w", err)
+	}
+
 	// settings needs more than ADD COLUMN: its original schema made `key`
 	// alone the PRIMARY KEY, so two tenants both setting e.g. "budget_inr"
 	// would silently overwrite each other's value. SQLite can't ALTER a

@@ -36,13 +36,18 @@ type Tenant struct {
 }
 
 // User is a real login identity, scoped to exactly one tenant.
+// SupabaseUserID is set for accounts created via real Supabase Auth
+// signup (empty for CLI-provisioned accounts, and vice versa --
+// PasswordHash is empty for Supabase-linked accounts, since Supabase
+// owns that credential, not this database).
 type User struct {
-	ID           int64
-	TenantID     int64
-	Username     string
-	PasswordHash string
-	Role         string
-	CreatedAt    time.Time
+	ID             int64
+	TenantID       int64
+	Username       string
+	PasswordHash   string
+	Role           string
+	SupabaseUserID string
+	CreatedAt      time.Time
 }
 
 // sessionTTL is deliberately short-ish and server-tracked (not a long-lived
@@ -143,6 +148,85 @@ func (s *Store) CreateUser(tenantID int64, username, password, role string) erro
 	}
 
 	return nil
+}
+
+// GetUserBySupabaseID looks up an already-provisioned user by their real
+// Supabase Auth identity. Returns sql.ErrNoRows (unwrapped, so callers
+// can check it directly) when nobody's been provisioned for this
+// Supabase user yet -- that's the signal to call
+// ProvisionTenantForSupabaseUser, not an error state on its own.
+func (s *Store) GetUserBySupabaseID(supabaseUserID string) (*User, error) {
+	var u User
+	var createdAt int64
+	err := s.db.QueryRow(
+		`SELECT id, tenant_id, username, role, supabase_user_id, created_at FROM users WHERE supabase_user_id = ?`,
+		supabaseUserID,
+	).Scan(&u.ID, &u.TenantID, &u.Username, &u.Role, &u.SupabaseUserID, &createdAt)
+	if err != nil {
+		return nil, err
+	}
+	u.CreatedAt = time.Unix(createdAt, 0)
+	return &u, nil
+}
+
+// ProvisionTenantForSupabaseUser is CreateTenant's counterpart for real
+// Supabase-backed signup: a brand-new tenant, one admin user linked to
+// the real Supabase identity (no local password -- Supabase owns that
+// credential), and one API ingest token, all in a single transaction.
+// Called exactly once per Supabase user, the first time their token is
+// ever seen (see requireSupabaseOrSession in auth.go) -- every request
+// after that resolves through GetUserBySupabaseID instead.
+func (s *Store) ProvisionTenantForSupabaseUser(supabaseUserID, email string) (*User, string, error) {
+	apiToken, err := randomToken(24)
+	if err != nil {
+		return nil, "", err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, "", fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().Unix()
+	tenantName := email
+
+	res, err := tx.Exec(`INSERT INTO tenants (name, created_at) VALUES (?, ?)`, tenantName, now)
+	if err != nil {
+		return nil, "", fmt.Errorf("insert tenant: %w", err)
+	}
+	tenantID, err := res.LastInsertId()
+	if err != nil {
+		return nil, "", fmt.Errorf("tenant id: %w", err)
+	}
+
+	res, err = tx.Exec(
+		`INSERT INTO users (tenant_id, username, password_hash, role, supabase_user_id, created_at) VALUES (?, ?, '', ?, ?, ?)`,
+		tenantID, email, RoleAdmin, supabaseUserID, now,
+	)
+	if err != nil {
+		return nil, "", fmt.Errorf("insert supabase-linked user: %w", err)
+	}
+	userID, err := res.LastInsertId()
+	if err != nil {
+		return nil, "", fmt.Errorf("user id: %w", err)
+	}
+
+	if _, err := tx.Exec(
+		`INSERT INTO api_tokens (tenant_id, token_hash, label, created_at) VALUES (?, ?, ?, ?)`,
+		tenantID, hashToken(apiToken), "supabase-signup", now,
+	); err != nil {
+		return nil, "", fmt.Errorf("insert api token: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, "", fmt.Errorf("commit: %w", err)
+	}
+
+	return &User{
+		ID: userID, TenantID: tenantID, Username: email, Role: RoleAdmin,
+		SupabaseUserID: supabaseUserID, CreatedAt: time.Unix(now, 0),
+	}, apiToken, nil
 }
 
 // CreateAPIToken issues a new ingest token for an existing tenant --

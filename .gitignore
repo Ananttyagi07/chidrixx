@@ -5,3 +5,8 @@ report.html.tmp
 controlplane/chidrixx-controlplane
 controlplane/controlplane.db
 controlplane/*.db
+
+# Real secrets (Supabase keys, etc.) — never committed.
+.env
+.env.local
+*.env.local

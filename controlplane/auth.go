@@ -3,7 +3,10 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"log"
 	"net/http"
+	"strings"
 )
 
 type contextKey string
@@ -65,13 +68,22 @@ func requireAPIToken(store *Store, next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// requireSession authenticates a browser request against the session
-// cookie set by /api/v1/auth/login, resolving it to a tenant + role. This
-// replaces the single shared Basic Auth token every dashboard read used to
-// go through -- a real login, not a password prompt for a secret everyone
-// shares.
-func requireSession(store *Store, next http.HandlerFunc) http.HandlerFunc {
+// requireSession authenticates a browser request either against a real
+// Supabase Auth access token (Authorization: Bearer ..., the real signup
+// path) or the legacy session cookie set by /api/v1/auth/login (the
+// self-hosted create-tenant/create-user CLI path). Both resolve to the
+// same tenant_id/role context every handler already reads -- the rest of
+// this codebase's tenant isolation doesn't need to know or care which
+// path a given request came in on.
+func requireSession(store *Store, supabaseAuth *SupabaseAuthenticator, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if supabaseAuth != nil {
+			if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+				handleSupabaseBearer(store, supabaseAuth, strings.TrimPrefix(authHeader, "Bearer "), w, r, next)
+				return
+			}
+		}
+
 		cookie, err := r.Cookie(sessionCookieName)
 		if err != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -89,6 +101,35 @@ func requireSession(store *Store, next http.HandlerFunc) http.HandlerFunc {
 		ctx = context.WithValue(ctx, ctxUsername, sess.Username)
 		next(w, r.WithContext(ctx))
 	}
+}
+
+// handleSupabaseBearer verifies a real Supabase access token, resolves it
+// to this control plane's own tenant/role model, auto-provisioning a
+// brand-new tenant the very first time a given Supabase identity is ever
+// seen (see ProvisionTenantForSupabaseUser in tenant.go) -- every request
+// after that resolves through the fast GetUserBySupabaseID lookup
+// instead.
+func handleSupabaseBearer(store *Store, supabaseAuth *SupabaseAuthenticator, token string, w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	supaUser, err := supabaseAuth.VerifyToken(token)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	user, err := store.GetUserBySupabaseID(supaUser.ID)
+	if err == sql.ErrNoRows {
+		user, _, err = store.ProvisionTenantForSupabaseUser(supaUser.ID, supaUser.Email)
+	}
+	if err != nil {
+		log.Printf("resolve supabase user %s: %v", supaUser.ID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	ctx := context.WithValue(r.Context(), ctxTenantID, user.TenantID)
+	ctx = context.WithValue(ctx, ctxRole, user.Role)
+	ctx = context.WithValue(ctx, ctxUsername, user.Username)
+	next(w, r.WithContext(ctx))
 }
 
 // requireAdmin gates a handler behind the viewer/admin role resolved by

@@ -44,6 +44,20 @@ func main() {
 
 	bootstrapDefaultTenant(store)
 
+	// Real Supabase-backed signup/login is opt-in via env vars -- unset
+	// (the default for a self-hosted install using the create-tenant CLI)
+	// means requireSession falls back to cookie-only auth exactly like
+	// before this feature existed. Only SUPABASE_URL and the public
+	// "publishable"/anon key are needed server-side: verifying a token via
+	// GET /auth/v1/user never touches the secret/service-role key.
+	var supabaseAuth *SupabaseAuthenticator
+	if url, key := os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_PUBLISHABLE_KEY"); url != "" && key != "" {
+		supabaseAuth = NewSupabaseAuthenticator(url, key)
+		log.Printf("supabase-backed auth enabled (%s)", url)
+	} else {
+		log.Println("SUPABASE_URL/SUPABASE_PUBLISHABLE_KEY not set — Supabase-backed login disabled, cookie/CLI auth only")
+	}
+
 	// The static SPA shell carries no secrets (no data is embedded at
 	// build time — everything real is fetched from the API below), so it
 	// serves publicly. The actual data endpoints stay behind real auth:
@@ -51,12 +65,12 @@ func main() {
 	// logged-in browser reads.
 	api := http.NewServeMux()
 	api.HandleFunc("/api/v1/ingest", requireAPIToken(store, handleIngest(store)))
-	api.HandleFunc("/api/v1/findings", requireSession(store, handleFindingsAPI(store)))
-	api.HandleFunc("/api/v1/dashboard-summary", requireSession(store, handleDashboardSummary(store)))
-	api.HandleFunc("/api/v1/budget", requireSession(store, budgetRoute(store)))
-	api.HandleFunc("/api/v1/teams", requireSession(store, teamsRoute(store)))
-	api.HandleFunc("/api/v1/workload-growth", requireSession(store, handleWorkloadGrowth(store)))
-	api.HandleFunc("/api/v1/auth/me", requireSession(store, handleMe))
+	api.HandleFunc("/api/v1/findings", requireSession(store, supabaseAuth, handleFindingsAPI(store)))
+	api.HandleFunc("/api/v1/dashboard-summary", requireSession(store, supabaseAuth, handleDashboardSummary(store)))
+	api.HandleFunc("/api/v1/budget", requireSession(store, supabaseAuth, budgetRoute(store)))
+	api.HandleFunc("/api/v1/teams", requireSession(store, supabaseAuth, teamsRoute(store)))
+	api.HandleFunc("/api/v1/workload-growth", requireSession(store, supabaseAuth, handleWorkloadGrowth(store)))
+	api.HandleFunc("/api/v1/auth/me", requireSession(store, supabaseAuth, handleMe))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/auth/login", handleLogin(store))
