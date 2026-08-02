@@ -112,7 +112,7 @@ export function LandingPage({ onEnter }: { onEnter: () => void }) {
           <IconArrowRight className="h-4 w-4" />
         </motion.button>
         <p className="text-xs text-[var(--ink-muted)]">
-          You'll be asked to sign in with your tenant's real login.
+          Sign up for your own real tenant, or sign in if you already have one.
         </p>
       </motion.div>
     </div>

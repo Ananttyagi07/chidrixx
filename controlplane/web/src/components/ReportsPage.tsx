@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { apiFetch } from "../apiFetch";
 import { motion } from "framer-motion";
 import type { DashboardSummary, FindingRow } from "../types";
 import { SpendTrendChart } from "./SpendTrendChart";
@@ -56,7 +57,7 @@ export function ReportsPage({ data }: { data: DashboardSummary }) {
     setExporting(true);
     setExportError(null);
     try {
-      const res = await fetch("/api/v1/findings");
+      const res = await apiFetch("/api/v1/findings");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const findings: FindingRow[] = await res.json();
       const csv = toCSV(findings);

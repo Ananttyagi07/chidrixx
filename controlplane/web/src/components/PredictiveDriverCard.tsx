@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../apiFetch";
 import { motion } from "framer-motion";
 import { cardMotion } from "../motion";
 import { formatINR } from "../format";
@@ -17,7 +18,7 @@ export function PredictiveDriverCard({ trend }: { trend: CostTrendPoint[] }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/v1/workload-growth")
+    apiFetch("/api/v1/workload-growth")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((d) => !cancelled && setGrowth(d))
       .catch(() => !cancelled && setGrowth([]));

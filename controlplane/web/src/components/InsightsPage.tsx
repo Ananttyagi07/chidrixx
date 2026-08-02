@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { apiFetch } from "../apiFetch";
 import { motion } from "framer-motion";
 import type { DashboardSummary, FindingRow } from "../types";
 import { PATH_CLASS_LABEL } from "../palette";
@@ -16,7 +17,7 @@ export function InsightsPage({ data }: { data: DashboardSummary }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/v1/findings")
+    apiFetch("/api/v1/findings")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((d) => !cancelled && setFindings(d))
       .catch(() => !cancelled && setFindings([]));

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useScroll, useTransform } from "framer-motion";
 import { fetchDashboardSummary } from "./api";
+import { supabase } from "./supabaseClient";
+import { apiFetch } from "./apiFetch";
 import type { DashboardSummary } from "./types";
 import { StatCard } from "./components/StatCard";
 import { SpendTrendChart } from "./components/SpendTrendChart";
@@ -336,17 +338,50 @@ export default function App() {
   const [phase, setPhase] = useState<"checking" | "landing" | "login" | "authed">("checking");
   const [session, setSession] = useState<Session | null>(null);
 
+  // Real auth state comes from Supabase (it persists/refreshes the
+  // session in localStorage on its own) -- a Supabase session existing is
+  // what decides whether to even attempt the control-plane resolve/
+  // auto-provision call below, rather than always hitting the API first
+  // and inferring auth state from whether it 401s.
   useEffect(() => {
-    fetch("/api/v1/auth/me")
-      .then((r) => {
-        if (!r.ok) throw new Error("not logged in");
-        return r.json();
-      })
-      .then((s: Session) => {
-        setSession(s);
-        setPhase("authed");
-      })
-      .catch(() => setPhase("landing"));
+    let cancelled = false;
+
+    async function resolve() {
+      const {
+        data: { session: supaSession },
+      } = await supabase.auth.getSession();
+
+      if (!supaSession) {
+        if (!cancelled) setPhase("landing");
+        return;
+      }
+
+      const res = await apiFetch("/api/v1/auth/me");
+      if (cancelled) return;
+      if (!res.ok) {
+        setPhase("landing");
+        return;
+      }
+      const s: Session = await res.json();
+      setSession(s);
+      setPhase("authed");
+    }
+
+    resolve();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        setSession(null);
+        setPhase("landing");
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   function handleLoggedIn(s: Session) {
@@ -355,7 +390,7 @@ export default function App() {
   }
 
   async function handleLogout() {
-    await fetch("/api/v1/auth/logout", { method: "POST" }).catch(() => {});
+    await supabase.auth.signOut();
     setSession(null);
     setPhase("landing");
   }

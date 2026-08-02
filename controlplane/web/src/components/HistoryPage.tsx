@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../apiFetch";
 import { motion } from "framer-motion";
 import { Area, AreaChart, ResponsiveContainer } from "recharts";
 import type { WorkloadGrowth } from "../types";
@@ -15,7 +16,7 @@ export function HistoryPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/v1/workload-growth")
+    apiFetch("/api/v1/workload-growth")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((d) => !cancelled && setGrowth(d))
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)));

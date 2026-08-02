@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { apiFetch } from "../apiFetch";
 import { motion } from "framer-motion";
 import type { FindingRow } from "../types";
 import { TopFixesTable } from "./TopFixesTable";
@@ -19,7 +20,7 @@ export function CostsUsagePage() {
   useEffect(() => {
     let cancelled = false;
 
-    fetch("/api/v1/findings")
+    apiFetch("/api/v1/findings")
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();

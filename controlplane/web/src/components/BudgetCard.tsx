@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../apiFetch";
 import { motion } from "framer-motion";
 import { cardMotion } from "../motion";
 import { formatINR } from "../format";
@@ -21,7 +22,7 @@ export function BudgetCard({ spentINR }: { spentINR: number }) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch("/api/v1/budget")
+    apiFetch("/api/v1/budget")
       .then((r) => r.json())
       .then(setBudget)
       .catch(() => setBudget({ budget_inr: 0, is_set: false }));
@@ -33,7 +34,7 @@ export function BudgetCard({ spentINR }: { spentINR: number }) {
 
     setSaving(true);
     try {
-      const res = await fetch("/api/v1/budget", {
+      const res = await apiFetch("/api/v1/budget", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ budget_inr: amount }),

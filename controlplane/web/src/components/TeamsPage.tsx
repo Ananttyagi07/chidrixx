@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../apiFetch";
 import { motion } from "framer-motion";
 import type { DashboardSummary, TeamOwnership } from "../types";
 import { formatINR } from "../format";
@@ -20,7 +21,7 @@ export function TeamsPage({ data }: { data: DashboardSummary }) {
   const [saving, setSaving] = useState(false);
 
   function reload() {
-    fetch("/api/v1/teams")
+    apiFetch("/api/v1/teams")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then(setOwnership)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
@@ -33,7 +34,7 @@ export function TeamsPage({ data }: { data: DashboardSummary }) {
     if (!namespace.trim() || !team.trim()) return;
     setSaving(true);
     try {
-      const res = await fetch("/api/v1/teams", {
+      const res = await apiFetch("/api/v1/teams", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ namespace: namespace.trim(), team: team.trim() }),
@@ -51,7 +52,7 @@ export function TeamsPage({ data }: { data: DashboardSummary }) {
 
   async function removeMapping(ns: string) {
     try {
-      const res = await fetch(`/api/v1/teams?namespace=${encodeURIComponent(ns)}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/v1/teams?namespace=${encodeURIComponent(ns)}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       reload();
     } catch (e) {
