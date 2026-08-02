@@ -116,6 +116,31 @@ CREATE TABLE IF NOT EXISTS invites (
 	role       TEXT NOT NULL,
 	created_at INTEGER NOT NULL
 );
+
+-- Closed-loop outcome tracking (build manual's AI-roadmap groundwork):
+-- every real fix recommendation surfaced on the dashboard is logged here,
+-- and if an operator marks it applied, this is where the real before/after
+-- cost gets recorded once fresher data confirms whether it actually
+-- worked -- not a fabricated ROI number, an observed one.
+CREATE TABLE IF NOT EXISTS recommendation_outcomes (
+	id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+	tenant_id                 INTEGER NOT NULL REFERENCES tenants(id),
+	cluster_id                TEXT NOT NULL,
+	source                    TEXT NOT NULL,
+	destination               TEXT NOT NULL,
+	path_class                TEXT NOT NULL,
+	fix_hint                  TEXT NOT NULL,
+	predicted_savings_low_inr REAL NOT NULL,
+	predicted_savings_high_inr REAL NOT NULL,
+	cost_before_inr           REAL NOT NULL,
+	first_shown_at            INTEGER NOT NULL,
+	last_shown_at             INTEGER NOT NULL,
+	applied_at                INTEGER,
+	cost_after_inr            REAL,
+	measured_at               INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_recommendation_outcomes_identity
+	ON recommendation_outcomes(tenant_id, cluster_id, source, destination, path_class);
 `
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()

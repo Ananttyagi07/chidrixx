@@ -112,6 +112,13 @@ func handleDashboardSummary(store *Store) http.HandlerFunc {
 			topFixes = topFixes[:10]
 		}
 
+		// Best-effort, like deploy-event ingestion: logging what got shown
+		// is bookkeeping for the outcome-tracking dataset, not something a
+		// dashboard load should ever fail over.
+		if err := store.RecordRecommendationsShown(tenantID, topFixes); err != nil {
+			log.Printf("dashboard-summary: record recommendations shown: %v", err)
+		}
+
 		anomalies, err := detectAnomalies(store, tenantID)
 		if err != nil {
 			log.Printf("dashboard-summary: anomalies: %v", err)

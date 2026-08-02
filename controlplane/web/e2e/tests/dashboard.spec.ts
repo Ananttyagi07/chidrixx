@@ -40,3 +40,18 @@ test("Automations lists the real generated NetworkPolicy-style fix, never auto-a
   await page.getByText("Automations").click();
   await expect(page.getByText(/never applies them automatically/i)).toBeVisible({ timeout: 10_000 });
 });
+
+test("marking a real fix applied on Overview is tracked server-side, not just a UI toggle", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText("checkout").first()).toBeVisible({ timeout: 10_000 });
+
+  await page.getByRole("button", { name: "Mark as applied" }).first().click();
+  await expect(page.getByText(/Applied — tracking real cost impact/)).toBeVisible({ timeout: 5_000 });
+
+  // Real round-trip through the API, not just optimistic UI state.
+  const res = await page.request.get("/api/v1/outcomes");
+  const outcomes = await res.json();
+  expect(outcomes).toContainEqual(
+    expect.objectContaining({ source: "checkout/checkout-abc", applied_at: expect.any(String) }),
+  );
+});
