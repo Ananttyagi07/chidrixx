@@ -113,6 +113,54 @@ CREATE TABLE IF NOT EXISTS flow_aggregate_daily (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_flow_aggregate_daily_key
 	ON flow_aggregate_daily(tenant_id, cluster_id, day, src_workload, dst_workload_or_endpoint, path_class);
 
+-- ai_eval_events is real observability for the AI features themselves
+-- (see aieval.go): one row per real chat turn or anomaly-narration call,
+-- capturing what actually happened -- latency, whether it succeeded,
+-- how many tool calls it made and how many of those errored, real token
+-- usage, and whether it had to give up at the round limit instead of
+-- converging. Not customer-facing telemetry -- this answers "is the AI
+-- actually working," a real gap this project had zero visibility into
+-- before.
+CREATE TABLE IF NOT EXISTS ai_eval_events (
+	id                INTEGER PRIMARY KEY AUTOINCREMENT,
+	tenant_id         INTEGER NOT NULL,
+	feature           TEXT NOT NULL,
+	occurred_at       INTEGER NOT NULL,
+	latency_ms        INTEGER NOT NULL,
+	success           INTEGER NOT NULL,
+	hit_round_limit   INTEGER NOT NULL DEFAULT 0,
+	rounds            INTEGER NOT NULL DEFAULT 0,
+	tool_call_count   INTEGER NOT NULL DEFAULT 0,
+	tool_call_errors  INTEGER NOT NULL DEFAULT 0,
+	prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+	completion_tokens INTEGER NOT NULL DEFAULT 0,
+	error_message     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ai_eval_events_tenant_feature ON ai_eval_events(tenant_id, feature);
+
+-- anomaly_alerts is the real "proactively surfaced" record (see
+-- anomaly_watch.go): today's anomaly detection is 100% pull (an operator
+-- must open the Anomalies page or ask the chat assistant), so this table
+-- exists to let a background loop actually notice a new anomaly and make
+-- it visible without anyone having to go looking. Keyed by
+-- (tenant_id, cluster_id, snapshot_reported_at) -- the real timestamp of
+-- the snapshot the anomaly was computed from -- so the same underlying
+-- anomaly (still true, nothing new happened) is never re-alerted as if
+-- it were a fresh event.
+CREATE TABLE IF NOT EXISTS anomaly_alerts (
+	id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+	tenant_id             INTEGER NOT NULL,
+	cluster_id            TEXT NOT NULL,
+	detected_at           INTEGER NOT NULL,
+	snapshot_reported_at  INTEGER NOT NULL,
+	previous_cost_inr     REAL NOT NULL,
+	current_cost_inr      REAL NOT NULL,
+	growth_ratio          REAL NOT NULL,
+	acknowledged_at       INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_anomaly_alerts_identity
+	ON anomaly_alerts(tenant_id, cluster_id, snapshot_reported_at);
+
 CREATE TABLE IF NOT EXISTS settings (
 	tenant_id INTEGER NOT NULL DEFAULT 1,
 	key       TEXT NOT NULL,

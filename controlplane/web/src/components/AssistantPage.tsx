@@ -1,10 +1,95 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { apiFetch } from "../apiFetch";
+import type { AIEvalFeatureStats } from "../types";
 
 interface ChatMessage {
   role: "user" | "assistant" | "error";
   content: string;
+}
+
+const FEATURE_LABEL: Record<string, string> = {
+  chat: "Chat assistant",
+  anomaly_narrator: "Anomaly narrator",
+};
+
+// Real observability for the AI features themselves (controlplane/aieval.go)
+// -- success rate, tool-call success rate, latency, token cost -- computed
+// from every real request this control plane has actually made to Groq,
+// not a sampled trace or a marketing claim. Answers "is the AI actually
+// working," a real gap this project had zero visibility into before.
+function AIEvalPanel() {
+  const [stats, setStats] = useState<AIEvalFeatureStats[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch("/api/v1/ai-eval/stats")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((d: { features: AIEvalFeatureStats[] }) => !cancelled && setStats(d.features))
+      .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (error) {
+    return (
+      <div className="rounded-xl border border-[var(--status-critical)]/40 bg-[var(--status-critical)]/10 px-3 py-2 text-xs text-[var(--status-critical)]">
+        Couldn't load AI evaluation stats: {error}
+      </div>
+    );
+  }
+
+  if (stats && stats.length === 0) {
+    return (
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-xs text-[var(--ink-muted)]">
+        No AI requests recorded yet — real evaluation data appears here once the chat assistant or
+        anomaly narrator has actually been used.
+      </div>
+    );
+  }
+
+  if (!stats) return null;
+
+  return (
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      {stats.map((f) => (
+        <div
+          key={f.feature}
+          className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-[var(--card-shadow)]"
+        >
+          <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-[var(--ink-muted)]">
+            {FEATURE_LABEL[f.feature] ?? f.feature}
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div>
+              <div className="text-[0.65rem] text-[var(--ink-muted)]">Success</div>
+              <div className="font-mono text-sm tabular-nums">{Math.round(f.success_rate * 100)}%</div>
+            </div>
+            <div>
+              <div className="text-[0.65rem] text-[var(--ink-muted)]">Avg latency</div>
+              <div className="font-mono text-sm tabular-nums">{Math.round(f.avg_latency_ms)}ms</div>
+            </div>
+            <div>
+              <div className="text-[0.65rem] text-[var(--ink-muted)]">Tokens</div>
+              <div className="font-mono text-sm tabular-nums">
+                {f.total_prompt_tokens + f.total_completion_tokens}
+              </div>
+            </div>
+          </div>
+          {f.total_tool_calls > 0 && (
+            <div className="mt-2 text-[0.65rem] text-[var(--ink-muted)]">
+              {f.total_tool_calls} real tool call{f.total_tool_calls === 1 ? "" : "s"},{" "}
+              {Math.round((f.tool_success_rate ?? 0) * 100)}% succeeded
+              {f.hit_round_limit_count > 0 &&
+                ` · ${f.hit_round_limit_count} request${f.hit_round_limit_count === 1 ? "" : "s"} hit the round limit`}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 const SUGGESTIONS = [
@@ -79,6 +164,8 @@ export function AssistantPage() {
           It never invents a number it can't look up.
         </p>
       </div>
+
+      <AIEvalPanel />
 
       <div
         ref={listRef}

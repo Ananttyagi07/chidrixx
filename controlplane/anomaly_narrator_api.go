@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 )
 
 type narrateAnomalyRequest struct {
@@ -68,7 +69,24 @@ func handleNarrateAnomaly(store *Store, groq *GroqClient) http.HandlerFunc {
 			return
 		}
 
-		narrative, err := narrateAnomaly(r.Context(), groq, *match)
+		start := time.Now()
+		narrative, usage, err := narrateAnomaly(r.Context(), groq, *match)
+
+		ev := AIEvalEvent{
+			Feature:          "anomaly_narrator",
+			LatencyMS:        time.Since(start).Milliseconds(),
+			Success:          err == nil,
+			Rounds:           1,
+			PromptTokens:     usage.PromptTokens,
+			CompletionTokens: usage.CompletionTokens,
+		}
+		if err != nil {
+			ev.ErrorMessage = err.Error()
+		}
+		if recErr := store.RecordAIEvalEvent(tenantID, ev); recErr != nil {
+			log.Printf("narrate-anomaly: record ai eval event: %v", recErr)
+		}
+
 		if err != nil {
 			log.Printf("narrate-anomaly: %v", err)
 			http.Error(w, "the assistant hit an error -- try again", http.StatusBadGateway)

@@ -159,6 +159,24 @@ export interface OutcomeDatasetStats {
   mean_abs_prediction_error_inr?: number;
 }
 
+export interface AIEvalFeatureStats {
+  feature: string;
+  total_requests: number;
+  success_count: number;
+  success_rate: number;
+  hit_round_limit_count: number;
+  avg_latency_ms: number;
+  total_tool_calls: number;
+  total_tool_call_errors: number;
+  tool_success_rate?: number;
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+}
+
+export interface AIEvalStatsResponse {
+  features: AIEvalFeatureStats[];
+}
+
 export interface DashboardSummary {
   summary: Summary;
   spend_by_class: ClassSpend[];

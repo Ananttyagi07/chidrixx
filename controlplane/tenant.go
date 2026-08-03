@@ -259,6 +259,29 @@ func (s *Store) TenantCount() (int, error) {
 	return n, nil
 }
 
+// AllTenantIDs lists every real tenant this control plane knows about --
+// used by background loops that need to do real per-tenant work across
+// the whole install (e.g. anomaly_watch.go's proactive detection), not by
+// any request-scoped code path (which already has its own tenant ID from
+// the session/token).
+func (s *Store) AllTenantIDs() ([]int64, error) {
+	rows, err := s.db.Query(`SELECT id FROM tenants ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("query tenant ids: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan tenant id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 var ErrInvalidCredentials = errors.New("invalid username or password")
 
 // AuthenticateUser verifies a username/password pair and returns the real

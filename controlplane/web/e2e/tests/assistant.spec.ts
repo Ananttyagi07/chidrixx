@@ -37,3 +37,18 @@ test("a direct POST to /api/v1/anomalies/narrate returns a real 503 when unconfi
   const res = await page.request.post("/api/v1/anomalies/narrate", { data: { cluster_id: "e2e-cluster" } });
   expect(res.status()).toBe(503);
 });
+
+// The AI evaluation panel (controlplane/aieval.go) reports real telemetry
+// from real Groq calls -- with no GROQ_API_KEY configured in this E2E
+// run, zero of those have ever happened, so the honest state is an empty
+// one, not a fabricated "0%" success rate that would misleadingly imply
+// real (failing) requests occurred.
+test("the AI evaluation panel shows an honest empty state, not a fabricated 0%", async ({ page }) => {
+  await page.goto("/");
+  await page.getByText("Assistant", { exact: true }).click();
+  await expect(page.getByText("No AI requests recorded yet")).toBeVisible({ timeout: 10_000 });
+
+  const res = await page.request.get("/api/v1/ai-eval/stats");
+  const body = await res.json();
+  expect(body.features).toEqual([]);
+});

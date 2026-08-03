@@ -85,15 +85,29 @@ type chatCompletionResponse struct {
 		Message      ChatMessage `json:"message"`
 		FinishReason string      `json:"finish_reason"`
 	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
 }
 
+// CompletionUsage is the real token accounting Groq's OpenAI-compatible
+// API returns alongside every completion -- captured so the AI
+// evaluation dashboard (aieval.go) can report real token cost, not an
+// estimate.
+type CompletionUsage struct {
+	PromptTokens     int
+	CompletionTokens int
+}
+
 // Complete sends one real chat-completion request and returns the
 // model's response message (which may itself be a tool-call request,
-// not a final answer -- the caller drives the loop).
-func (c *GroqClient) Complete(ctx context.Context, messages []ChatMessage, tools []ToolDef) (ChatMessage, error) {
+// not a final answer -- the caller drives the loop) plus the real token
+// usage for this one request.
+func (c *GroqClient) Complete(ctx context.Context, messages []ChatMessage, tools []ToolDef) (ChatMessage, CompletionUsage, error) {
 	reqBody := chatCompletionRequest{
 		Model:       c.model,
 		Messages:    messages,
@@ -102,39 +116,45 @@ func (c *GroqClient) Complete(ctx context.Context, messages []ChatMessage, tools
 	}
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return ChatMessage{}, fmt.Errorf("marshal groq request: %w", err)
+		return ChatMessage{}, CompletionUsage{}, fmt.Errorf("marshal groq request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return ChatMessage{}, fmt.Errorf("build groq request: %w", err)
+		return ChatMessage{}, CompletionUsage{}, fmt.Errorf("build groq request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return ChatMessage{}, fmt.Errorf("groq request: %w", err)
+		return ChatMessage{}, CompletionUsage{}, fmt.Errorf("groq request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return ChatMessage{}, fmt.Errorf("read groq response: %w", err)
+		return ChatMessage{}, CompletionUsage{}, fmt.Errorf("read groq response: %w", err)
 	}
 
 	var parsed chatCompletionResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return ChatMessage{}, fmt.Errorf("decode groq response (status %d): %w", resp.StatusCode, err)
+		return ChatMessage{}, CompletionUsage{}, fmt.Errorf("decode groq response (status %d): %w", resp.StatusCode, err)
 	}
 	if parsed.Error != nil {
-		return ChatMessage{}, fmt.Errorf("groq API error (status %d): %s", resp.StatusCode, parsed.Error.Message)
+		return ChatMessage{}, CompletionUsage{}, fmt.Errorf("groq API error (status %d): %s", resp.StatusCode, parsed.Error.Message)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return ChatMessage{}, fmt.Errorf("groq API returned status %d: %s", resp.StatusCode, string(respBody))
+		return ChatMessage{}, CompletionUsage{}, fmt.Errorf("groq API returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 	if len(parsed.Choices) == 0 {
-		return ChatMessage{}, fmt.Errorf("groq response had no choices")
+		return ChatMessage{}, CompletionUsage{}, fmt.Errorf("groq response had no choices")
 	}
-	return parsed.Choices[0].Message, nil
+
+	var usage CompletionUsage
+	if parsed.Usage != nil {
+		usage.PromptTokens = parsed.Usage.PromptTokens
+		usage.CompletionTokens = parsed.Usage.CompletionTokens
+	}
+	return parsed.Choices[0].Message, usage, nil
 }

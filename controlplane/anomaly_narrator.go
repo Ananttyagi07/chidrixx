@@ -19,8 +19,10 @@ Rules:
 // natural-language explanation. Deliberately no tool-calling here -- all
 // the real data (the two costs, the ratio, the optional real deploy
 // event) is already known, so this is a single completion, not an
-// agentic loop, and cheaper/faster because of it.
-func narrateAnomaly(ctx context.Context, groq *GroqClient, a Anomaly) (string, error) {
+// agentic loop, and cheaper/faster because of it. Returns the real token
+// usage alongside the narrative so the caller can record it for the AI
+// evaluation dashboard (aieval.go).
+func narrateAnomaly(ctx context.Context, groq *GroqClient, a Anomaly) (string, CompletionUsage, error) {
 	prompt := fmt.Sprintf(
 		"Cluster: %s\nPrevious cost: INR %.2f\nCurrent cost: INR %.2f\nGrowth ratio: %.2fx\n",
 		a.ClusterID, a.PreviousCostINR, a.CurrentCostINR, a.GrowthRatio,
@@ -34,12 +36,12 @@ func narrateAnomaly(ctx context.Context, groq *GroqClient, a Anomaly) (string, e
 		prompt += "Likely-cause deploy event: none found\n"
 	}
 
-	msg, err := groq.Complete(ctx, []ChatMessage{
+	msg, usage, err := groq.Complete(ctx, []ChatMessage{
 		{Role: "system", Content: anomalyNarratorSystemPrompt},
 		{Role: "user", Content: prompt},
 	}, nil)
 	if err != nil {
-		return "", err
+		return "", CompletionUsage{}, err
 	}
-	return msg.Content, nil
+	return msg.Content, usage, nil
 }

@@ -38,7 +38,7 @@ func TestNarrateAnomalyMentionsRealNumbersAndLikelyCause(t *testing.T) {
 		},
 	}
 
-	narrative, err := narrateAnomaly(t.Context(), client, anomaly)
+	narrative, _, err := narrateAnomaly(t.Context(), client, anomaly)
 	if err != nil {
 		t.Fatalf("narrateAnomaly: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestNarrateAnomalyWithNoLikelyCauseStillPrompts(t *testing.T) {
 	client := newGroqClient("test-key", "", srv.URL)
 
 	anomaly := Anomaly{ClusterID: "cluster-a", PreviousCostINR: 10, CurrentCostINR: 50, GrowthRatio: 5}
-	if _, err := narrateAnomaly(t.Context(), client, anomaly); err != nil {
+	if _, _, err := narrateAnomaly(t.Context(), client, anomaly); err != nil {
 		t.Fatalf("narrateAnomaly: %v", err)
 	}
 	if !bytes.Contains([]byte(capturedPrompt), []byte("none found")) {
@@ -138,6 +138,14 @@ func TestHandleNarrateAnomalyEndToEndWithRealAnomaly(t *testing.T) {
 	}
 	if got.Narrative != "Cost roughly 5x'd for cluster-a." {
 		t.Fatalf("unexpected narrative: %q", got.Narrative)
+	}
+
+	stats, err := store.AIEvalStats(tenantID)
+	if err != nil {
+		t.Fatalf("AIEvalStats: %v", err)
+	}
+	if len(stats) != 1 || stats[0].Feature != "anomaly_narrator" || stats[0].SuccessCount != 1 {
+		t.Fatalf("expected handleNarrateAnomaly to record a real successful ai eval event, got %+v", stats)
 	}
 }
 

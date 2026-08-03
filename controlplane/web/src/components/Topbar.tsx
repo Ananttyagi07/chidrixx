@@ -2,6 +2,7 @@ import { useState, type ComponentType } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import DecryptedTextRaw from "./DecryptedText";
 import { IconCalendar, IconDownload, IconFilter, IconSun } from "../icons";
+import { AnomalyAlertBell } from "./AnomalyAlertBell";
 
 const DecryptedText = DecryptedTextRaw as ComponentType<any>;
 import type { DashboardSummary } from "../types";
@@ -96,6 +97,7 @@ export function Topbar({ data }: { data: DashboardSummary | null }) {
           >
             <IconDownload className="h-4 w-4" />
           </motion.button>
+          <AnomalyAlertBell />
         </div>
       </div>
 

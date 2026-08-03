@@ -31,6 +31,12 @@ type Anomaly struct {
 	CurrentCostINR  float64      `json:"current_cost_inr"`
 	GrowthRatio     float64      `json:"growth_ratio"`
 	LikelyCause     *DeployEvent `json:"likely_cause,omitempty"`
+	// SnapshotReportedAt is the real "current" snapshot's own timestamp
+	// this anomaly was computed from -- the real, stable identity a
+	// proactive watcher (anomaly_watch.go) uses to tell "the same
+	// anomaly, still unchanged since the last snapshot" apart from "a
+	// genuinely new one," rather than re-alerting on every tick.
+	SnapshotReportedAt time.Time `json:"snapshot_reported_at"`
 }
 
 // detectAnomalies compares each of the given clusters' two most recent
@@ -69,14 +75,15 @@ func detectAnomalies(store *Store, tenantID int64, clusterIDs []string) ([]Anoma
 
 		ratio := current / previous
 		if ratio >= anomalyGrowthRatioThreshold {
+			currentSnapshotTime := trend[len(trend)-1].ReportedAt
 			anomaly := Anomaly{
-				ClusterID:       clusterID,
-				PreviousCostINR: previous,
-				CurrentCostINR:  current,
-				GrowthRatio:     ratio,
+				ClusterID:          clusterID,
+				PreviousCostINR:    previous,
+				CurrentCostINR:     current,
+				GrowthRatio:        ratio,
+				SnapshotReportedAt: currentSnapshotTime,
 			}
 
-			currentSnapshotTime := trend[len(trend)-1].ReportedAt
 			events, err := store.RecentDeployEvents(
 				tenantID, clusterID,
 				currentSnapshotTime.Add(-anomalyCauseLookback), currentSnapshotTime,

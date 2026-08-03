@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 )
 
 const chatSystemPrompt = `You are the chidrixx cost assistant, embedded in a real Kubernetes network-cost dashboard. You answer questions about ONE real tenant's real infrastructure cost data using the tools available to you.
@@ -74,7 +75,27 @@ func handleChat(store *Store, groq *GroqClient) http.HandlerFunc {
 		}
 		messages = append(messages, ChatMessage{Role: "user", Content: req.Message})
 
-		reply, err := runChatLoop(r.Context(), groq, tools, defs, messages)
+		start := time.Now()
+		result, err := runChatLoop(r.Context(), groq, tools, defs, messages)
+
+		ev := AIEvalEvent{
+			Feature:          "chat",
+			LatencyMS:        time.Since(start).Milliseconds(),
+			Success:          err == nil,
+			HitRoundLimit:    result.HitRoundLimit,
+			Rounds:           result.Rounds,
+			ToolCallCount:    result.ToolCallCount,
+			ToolCallErrors:   result.ToolCallErrors,
+			PromptTokens:     result.PromptTokens,
+			CompletionTokens: result.CompletionTokens,
+		}
+		if err != nil {
+			ev.ErrorMessage = err.Error()
+		}
+		if recErr := store.RecordAIEvalEvent(tenantID, ev); recErr != nil {
+			log.Printf("chat: record ai eval event: %v", recErr)
+		}
+
 		if err != nil {
 			log.Printf("chat: %v", err)
 			http.Error(w, "the chat assistant hit an error -- try again", http.StatusBadGateway)
@@ -82,34 +103,58 @@ func handleChat(store *Store, groq *GroqClient) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(chatResponse{Reply: reply})
+		json.NewEncoder(w).Encode(chatResponse{Reply: result.Reply})
 	}
+}
+
+// chatLoopResult is runChatLoop's real, complete accounting of one chat
+// turn -- not just the final reply, but the real telemetry the AI
+// evaluation dashboard (aieval.go) needs: how many rounds/tool calls it
+// took, how many of those tool calls errored, real token usage, and
+// whether it had to give up at maxChatToolRounds instead of converging.
+type chatLoopResult struct {
+	Reply            string
+	Rounds           int
+	ToolCallCount    int
+	ToolCallErrors   int
+	PromptTokens     int
+	CompletionTokens int
+	HitRoundLimit    bool
 }
 
 // runChatLoop drives the real tool-calling round trip: ask the model,
 // and if it asks for a tool instead of answering, execute the tool
 // against real tenant-scoped data and feed the result back, up to
 // maxChatToolRounds times before giving up honestly.
-func runChatLoop(ctx context.Context, groq *GroqClient, tools []chatTool, defs []ToolDef, messages []ChatMessage) (string, error) {
+func runChatLoop(ctx context.Context, groq *GroqClient, tools []chatTool, defs []ToolDef, messages []ChatMessage) (chatLoopResult, error) {
+	var res chatLoopResult
 	for i := 0; i < maxChatToolRounds; i++ {
-		msg, err := completeWithRetry(ctx, groq, messages, defs)
+		res.Rounds++
+		msg, usage, err := completeWithRetry(ctx, groq, messages, defs)
 		if err != nil {
-			return "", err
+			return res, err
 		}
+		res.PromptTokens += usage.PromptTokens
+		res.CompletionTokens += usage.CompletionTokens
+
 		if len(msg.ToolCalls) == 0 {
-			return msg.Content, nil
+			res.Reply = msg.Content
+			return res, nil
 		}
 
 		messages = append(messages, msg)
 		for _, tc := range msg.ToolCalls {
+			res.ToolCallCount++
 			var result string
 			tool, found := findTool(tools, tc.Function.Name)
 			if !found {
 				result = `{"error":"unknown tool"}`
+				res.ToolCallErrors++
 			} else {
 				out, err := tool.call([]byte(tc.Function.Arguments))
 				if err != nil {
 					result = mustJSON(map[string]string{"error": err.Error()})
+					res.ToolCallErrors++
 				} else {
 					result = out
 				}
@@ -121,7 +166,9 @@ func runChatLoop(ctx context.Context, groq *GroqClient, tools []chatTool, defs [
 			})
 		}
 	}
-	return "I wasn't able to finish answering that within a reasonable number of steps -- try asking something more specific.", nil
+	res.Reply = "I wasn't able to finish answering that within a reasonable number of steps -- try asking something more specific."
+	res.HitRoundLimit = true
+	return res, nil
 }
 
 // completeWithRetry retries a single completion once. Groq validates a
@@ -131,10 +178,10 @@ func runChatLoop(ctx context.Context, groq *GroqClient, tools []chatTool, defs [
 // declared) -- a real, observed failure mode of smaller/faster models,
 // not something our request caused. Resampling the same request often
 // produces a conforming tool call on the second try.
-func completeWithRetry(ctx context.Context, groq *GroqClient, messages []ChatMessage, defs []ToolDef) (ChatMessage, error) {
-	msg, err := groq.Complete(ctx, messages, defs)
+func completeWithRetry(ctx context.Context, groq *GroqClient, messages []ChatMessage, defs []ToolDef) (ChatMessage, CompletionUsage, error) {
+	msg, usage, err := groq.Complete(ctx, messages, defs)
 	if err == nil {
-		return msg, nil
+		return msg, usage, nil
 	}
 	return groq.Complete(ctx, messages, defs)
 }

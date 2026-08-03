@@ -93,6 +93,9 @@ func main() {
 	api.HandleFunc("/api/v1/outcomes/stats", requireSession(store, supabaseAuth, handleOutcomeStats(store)))
 	api.HandleFunc("/api/v1/chat", requireSession(store, supabaseAuth, handleChat(store, groq)))
 	api.HandleFunc("/api/v1/anomalies/narrate", requireSession(store, supabaseAuth, handleNarrateAnomaly(store, groq)))
+	api.HandleFunc("/api/v1/ai-eval/stats", requireSession(store, supabaseAuth, handleAIEvalStats(store)))
+	api.HandleFunc("/api/v1/anomalies/alerts", requireSession(store, supabaseAuth, handleAnomalyAlerts(store)))
+	api.HandleFunc("/api/v1/anomalies/alerts/acknowledge", requireSession(store, supabaseAuth, handleAcknowledgeAnomalyAlert(store)))
 	api.HandleFunc("/api/v1/forecast", requireSession(store, supabaseAuth, handleForecast(store)))
 	api.HandleFunc("/api/v1/remediation/preview", requireSession(store, supabaseAuth, handleRemediationPreview(store)))
 	api.HandleFunc("/api/v1/placement/preview", requireSession(store, supabaseAuth, handlePlacementPreview(store)))
@@ -122,6 +125,27 @@ func main() {
 	}
 	go store.StartCompactionLoop(retention, time.Hour, make(chan struct{}), log.Printf)
 	log.Printf("automated compaction enabled: raw flow_aggregate rows older than %s are folded into daily rollups every hour", retention)
+
+	// Real proactive anomaly detection (see anomaly_watch.go): the same
+	// existing detectAnomalies logic, now run on a recurring background
+	// tick per real tenant instead of only when an operator opens a page
+	// or asks the chat assistant. 5 minutes is frequent enough to feel
+	// proactive without adding meaningful load -- detectAnomalies only
+	// ever reads each cluster's latest 2 already-ingested snapshots.
+	// CHIDRIXX_ANOMALY_WATCH_INTERVAL (a Go duration string, e.g. "2s")
+	// lets the E2E suite (globalSetup.ts) tighten this so a real test can
+	// observe a real tick without waiting 5 real minutes; unset keeps the
+	// 5-minute default.
+	anomalyWatchInterval := 5 * time.Minute
+	if raw := os.Getenv("CHIDRIXX_ANOMALY_WATCH_INTERVAL"); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			anomalyWatchInterval = d
+		} else {
+			log.Printf("CHIDRIXX_ANOMALY_WATCH_INTERVAL=%q is not a valid positive duration, keeping the default of %s", raw, anomalyWatchInterval)
+		}
+	}
+	go store.StartAnomalyWatchLoop(anomalyWatchInterval, make(chan struct{}), log.Printf)
+	log.Printf("proactive anomaly watch enabled: checking every %s for new real anomalies per tenant", anomalyWatchInterval)
 
 	log.Printf("chidrixx control plane listening on %s (store: %s)", *addr, *dbPath)
 	log.Fatal(http.ListenAndServe(*addr, mux))

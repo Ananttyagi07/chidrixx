@@ -94,7 +94,7 @@ func TestGroqClientCompleteReturnsPlainContent(t *testing.T) {
 	srv := fakeGroq(t, "test-key", []chatCompletionResponse{contentResponse("hello from groq")})
 	client := newGroqClient("test-key", "", srv.URL)
 
-	msg, err := client.Complete(t.Context(), []ChatMessage{{Role: "user", Content: "hi"}}, nil)
+	msg, _, err := client.Complete(t.Context(), []ChatMessage{{Role: "user", Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
@@ -103,11 +103,29 @@ func TestGroqClientCompleteReturnsPlainContent(t *testing.T) {
 	}
 }
 
+func TestGroqClientCompleteReturnsRealTokenUsage(t *testing.T) {
+	resp := contentResponse("hello from groq")
+	resp.Usage = &struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	}{PromptTokens: 42, CompletionTokens: 7}
+	srv := fakeGroq(t, "test-key", []chatCompletionResponse{resp})
+	client := newGroqClient("test-key", "", srv.URL)
+
+	_, usage, err := client.Complete(t.Context(), []ChatMessage{{Role: "user", Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if usage.PromptTokens != 42 || usage.CompletionTokens != 7 {
+		t.Fatalf("expected real usage (42, 7) from the response, got %+v", usage)
+	}
+}
+
 func TestGroqClientCompleteReturnsToolCall(t *testing.T) {
 	srv := fakeGroq(t, "test-key", []chatCompletionResponse{toolCallResponse("call-1", "get_anomalies", "{}")})
 	client := newGroqClient("test-key", "", srv.URL)
 
-	msg, err := client.Complete(t.Context(), []ChatMessage{{Role: "user", Content: "why did my bill spike"}}, nil)
+	msg, _, err := client.Complete(t.Context(), []ChatMessage{{Role: "user", Content: "why did my bill spike"}}, nil)
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
@@ -126,7 +144,7 @@ func TestGroqClientCompleteSurfacesAPIError(t *testing.T) {
 	t.Cleanup(srv.Close)
 	client := newGroqClient("test-key", "", srv.URL)
 
-	_, err := client.Complete(t.Context(), []ChatMessage{{Role: "user", Content: "hi"}}, nil)
+	_, _, err := client.Complete(t.Context(), []ChatMessage{{Role: "user", Content: "hi"}}, nil)
 	if err == nil {
 		t.Fatal("expected an error for a real rate-limit response, got nil")
 	}
@@ -154,14 +172,14 @@ func TestRunChatLoopRetriesOnceOnATransientGroqError(t *testing.T) {
 	client := newGroqClient("test-key", "", srv.URL)
 	tools := buildChatTools(s, tenantID)
 
-	reply, err := runChatLoop(t.Context(), client, tools, toolDefs(tools), []ChatMessage{
+	result, err := runChatLoop(t.Context(), client, tools, toolDefs(tools), []ChatMessage{
 		{Role: "user", Content: "hi"},
 	})
 	if err != nil {
 		t.Fatalf("runChatLoop: %v", err)
 	}
-	if reply != "recovered on retry" {
-		t.Fatalf("unexpected reply: %q", reply)
+	if result.Reply != "recovered on retry" {
+		t.Fatalf("unexpected reply: %q", result.Reply)
 	}
 	if call != 2 {
 		t.Fatalf("expected exactly 2 calls (1 failure + 1 retry), got %d", call)
@@ -184,15 +202,18 @@ func TestRunChatLoopCallsToolThenReturnsFinalAnswer(t *testing.T) {
 	client := newGroqClient("test-key", "", srv.URL)
 	tools := buildChatTools(s, tenantID)
 
-	reply, err := runChatLoop(t.Context(), client, tools, toolDefs(tools), []ChatMessage{
+	result, err := runChatLoop(t.Context(), client, tools, toolDefs(tools), []ChatMessage{
 		{Role: "system", Content: chatSystemPrompt},
 		{Role: "user", Content: "what should I fix first?"},
 	})
 	if err != nil {
 		t.Fatalf("runChatLoop: %v", err)
 	}
-	if reply != "Your top fix is checkout -> redis, costing ₹40." {
-		t.Fatalf("unexpected reply: %q", reply)
+	if result.Reply != "Your top fix is checkout -> redis, costing ₹40." {
+		t.Fatalf("unexpected reply: %q", result.Reply)
+	}
+	if result.ToolCallCount != 1 || result.ToolCallErrors != 0 {
+		t.Fatalf("expected 1 real tool call with no errors, got %+v", result)
 	}
 }
 
@@ -210,14 +231,20 @@ func TestRunChatLoopStopsAfterMaxRoundsInsteadOfLoopingForever(t *testing.T) {
 	client := newGroqClient("test-key", "", srv.URL)
 	tools := buildChatTools(s, tenantID)
 
-	reply, err := runChatLoop(t.Context(), client, tools, toolDefs(tools), []ChatMessage{
+	result, err := runChatLoop(t.Context(), client, tools, toolDefs(tools), []ChatMessage{
 		{Role: "user", Content: "loop forever"},
 	})
 	if err != nil {
 		t.Fatalf("runChatLoop: %v", err)
 	}
-	if reply == "" {
+	if result.Reply == "" {
 		t.Fatal("expected a real fallback message, not an empty reply")
+	}
+	if !result.HitRoundLimit {
+		t.Fatal("expected HitRoundLimit to be true when the loop exhausts maxChatToolRounds")
+	}
+	if result.Rounds != maxChatToolRounds {
+		t.Fatalf("expected Rounds = %d, got %d", maxChatToolRounds, result.Rounds)
 	}
 }
 
@@ -232,14 +259,17 @@ func TestRunChatLoopHandlesUnknownToolGracefully(t *testing.T) {
 	client := newGroqClient("test-key", "", srv.URL)
 	tools := buildChatTools(s, tenantID)
 
-	reply, err := runChatLoop(t.Context(), client, tools, toolDefs(tools), []ChatMessage{
+	result, err := runChatLoop(t.Context(), client, tools, toolDefs(tools), []ChatMessage{
 		{Role: "user", Content: "delete everything"},
 	})
 	if err != nil {
 		t.Fatalf("runChatLoop: %v", err)
 	}
-	if reply != "I can't do that." {
-		t.Fatalf("unexpected reply: %q", reply)
+	if result.Reply != "I can't do that." {
+		t.Fatalf("unexpected reply: %q", result.Reply)
+	}
+	if result.ToolCallCount != 1 || result.ToolCallErrors != 1 {
+		t.Fatalf("expected 1 real tool call that errored (unknown tool), got %+v", result)
 	}
 }
 
@@ -331,5 +361,49 @@ func TestHandleChatEndToEndWithRealDataAndFakeGroq(t *testing.T) {
 	}
 	if got.Reply != "checkout -> redis is your top real cost driver at ₹40." {
 		t.Fatalf("unexpected reply: %q", got.Reply)
+	}
+
+	// The real point of aieval.go: this actual HTTP call must leave a
+	// real observability record behind, not just a chat reply.
+	stats, err := store.AIEvalStats(tenantID)
+	if err != nil {
+		t.Fatalf("AIEvalStats: %v", err)
+	}
+	if len(stats) != 1 || stats[0].Feature != "chat" || stats[0].TotalRequests != 1 || stats[0].SuccessCount != 1 {
+		t.Fatalf("expected handleChat to record a real successful ai eval event, got %+v", stats)
+	}
+	if stats[0].TotalToolCalls != 1 {
+		t.Fatalf("expected the real tool call to be counted, got %+v", stats[0])
+	}
+}
+
+func TestHandleChatRecordsAFailedAIEvalEventOnGroqError(t *testing.T) {
+	store := testStore(t)
+	tenantID := testTenant(t, store)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"message": "rate limited"}})
+	}))
+	t.Cleanup(srv.Close)
+	client := newGroqClient("test-key", "", srv.URL)
+
+	body, _ := json.Marshal(chatRequest{Message: "hi"})
+	req := withTenant(httptest.NewRequest(http.MethodPost, "/api/v1/chat", bytes.NewReader(body)), tenantID)
+	rec := httptest.NewRecorder()
+	handleChat(store, client)(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+
+	stats, err := store.AIEvalStats(tenantID)
+	if err != nil {
+		t.Fatalf("AIEvalStats: %v", err)
+	}
+	// completeWithRetry retries once, so this is really 2 real failed
+	// Groq calls but still exactly 1 real recorded chat request/outcome.
+	if len(stats) != 1 || stats[0].SuccessCount != 0 || stats[0].TotalRequests != 1 {
+		t.Fatalf("expected 1 real recorded failed request, got %+v", stats)
 	}
 }

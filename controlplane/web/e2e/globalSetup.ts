@@ -10,7 +10,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { findGo } from "./goBinary";
-import { ADMIN_PASSWORD, ADMIN_USER, BASE_URL, BINARY_PATH, DB_PATH, E2E_DIR, PID_FILE, PORT, TENANT_NAME, VIEWER_PASSWORD, VIEWER_USER } from "./env";
+import { ADMIN_PASSWORD, ADMIN_USER, BASE_URL, BINARY_PATH, DB_PATH, E2E_DIR, INGEST_TOKEN_FILE, PID_FILE, PORT, TENANT_NAME, VIEWER_PASSWORD, VIEWER_USER } from "./env";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONTROLPLANE_DIR = path.resolve(__dirname, "../..");
@@ -51,6 +51,12 @@ export default async function globalSetup() {
   }
   const tenantID = tenantIdMatch[1];
   const ingestToken = ingestTokenMatch[1];
+  // Written to disk so individual spec files (anomaly-watch.spec.ts) can
+  // make their own real, isolated /api/v1/ingest calls -- e.g. to build a
+  // fresh anomaly on a cluster ID no other test's fixture-value
+  // assertions depend on, rather than mutating the shared "e2e-cluster"
+  // fixture every other spec file relies on.
+  writeFileSync(INGEST_TOKEN_FILE, ingestToken);
 
   console.log("[e2e] provisioning real viewer user...");
   execFileSync(BINARY_PATH, [
@@ -62,6 +68,11 @@ export default async function globalSetup() {
   const server = spawn(BINARY_PATH, ["-addr", `:${PORT}`, "-db", DB_PATH], {
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
+    // A real 2s proactive-anomaly-watch tick (main.go's 5-minute default,
+    // overridden here) -- so the E2E suite can observe a real background
+    // detection cycle within a test's timeout instead of waiting 5 real
+    // minutes.
+    env: { ...process.env, CHIDRIXX_ANOMALY_WATCH_INTERVAL: "2s" },
   });
   server.stdout?.on("data", (d) => process.stdout.write(`[e2e:server] ${d}`));
   server.stderr?.on("data", (d) => process.stderr.write(`[e2e:server] ${d}`));

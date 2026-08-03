@@ -40,7 +40,7 @@ chidrixx/
 │       ├── kharcha/     the eBPF agent binary          — 12 test files, 26 test functions
 │       └── loadgen/     load-test traffic generator (no tests)
 ├── controlplane/        module `chidrixx-controlplane` — 5,122 lines Go (excl. tests), 35 files
-│   ├── web/             React/Vite/TS dashboard SPA    — 5,258 lines TS/TSX, 36 .tsx + 10 .ts files
+│   ├── web/             React/Vite/TS dashboard SPA    — 5,488 lines TS/TSX, 37 .tsx + 10 .ts files
 │   └── e2e/             committed Playwright E2E suite — 10 .ts files (§3.10)
 ├── bpf/                 flow_cgroup.c + compiled flow_cgroup.o (committed binary, go:embed'd)
 ├── pricebook/            aws.yaml, gcp.yaml — real cited price data
@@ -49,7 +49,7 @@ chidrixx/
 └── .github/workflows/   ci.yml — 7 jobs, both modules (§6)
 ```
 
-Total: **~13,500 lines** of hand-written Go + TypeScript across both
+Total: **~14,400 lines** of hand-written Go + TypeScript across both
 modules and the frontend (not counting vendored react-bits `.jsx`/`.css`
 files, which are third-party, installed via the real `shadcn` CLI; not
 counting the separate 10-file E2E suite). All four counts above were
@@ -218,7 +218,7 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
   `bpf/flow_cgroup.o`) and `go:embed`'d — `go build`/`go test` need no
   Node install. 15 sidebar pages total (full list in §4).
 
-### 3.2 API routes — 18 real endpoints + the static SPA shell route, exact
+### 3.2 API routes — 21 real endpoints + the static SPA shell route, exact
 
 | Route | Method(s) | Auth | Handler |
 |---|---|---|---|
@@ -231,18 +231,21 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
 | `/api/v1/workload-growth` | GET | `requireSession` | `handleWorkloadGrowth` |
 | `/api/v1/outcomes` | GET | `requireSession` | `handleOutcomes` |
 | `/api/v1/outcomes/apply` | POST | `requireSession` | `handleMarkOutcomeApplied` |
-| `/api/v1/outcomes/stats` **(new)** | GET | `requireSession` | `handleOutcomeStats` — real aggregate shown/applied/measured counts + mean prediction error (§3.19) |
+| `/api/v1/outcomes/stats` | GET | `requireSession` | `handleOutcomeStats` — real aggregate shown/applied/measured counts + mean prediction error (§3.19) |
 | `/api/v1/chat` | POST | `requireSession` | `handleChat` (503 if `GROQ_API_KEY` unset) |
 | `/api/v1/anomalies/narrate` | POST | `requireSession` | `handleNarrateAnomaly` (503 if `GROQ_API_KEY` unset) |
+| `/api/v1/ai-eval/stats` **(new)** | GET | `requireSession` | `handleAIEvalStats` — real per-feature success rate/latency/tool success/token cost for the chat assistant and anomaly narrator (§3.20) |
+| `/api/v1/anomalies/alerts` **(new)** | GET | `requireSession` | `handleAnomalyAlerts` — real, unacknowledged, proactively-detected anomalies (§3.21) |
+| `/api/v1/anomalies/alerts/acknowledge` **(new)** | POST | `requireSession` | `handleAcknowledgeAnomalyAlert` — dismiss one real alert |
 | `/api/v1/forecast` | GET | `requireSession` | `handleForecast` — `?cluster_id=X`, real backtested model selection (§3.14) |
 | `/api/v1/remediation/preview` | GET | `requireSession` | `handleRemediationPreview` — real dry-run auto-remediation policy evaluation, never mutates anything (§3.16) |
-| `/api/v1/placement/preview` **(new)** | GET | `requireSession` | `handlePlacementPreview` — real offline graph-partitioning simulation, `?groups=N` (§3.17) |
+| `/api/v1/placement/preview` | GET | `requireSession` | `handlePlacementPreview` — real offline graph-partitioning simulation, `?groups=N` (§3.17) |
 | `/api/v1/auth/me` | GET | `requireSession` | `handleMe` |
 | `/api/v1/auth/login` | POST | none (that's the point) | `handleLogin` |
 | `/api/v1/auth/logout` | POST | none | `handleLogout` |
 | `/` | GET | none (static SPA shell, no secrets embedded) | `webAssetsHandler` |
 
-### 3.3 SQLite schema — 10 tables, exact DDL shape
+### 3.3 SQLite schema — 12 tables, exact DDL shape
 
 | Table | Key columns | Notes |
 |---|---|---|
@@ -256,7 +259,9 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
 | `team_ownership` | `(tenant_id, namespace)` composite PK, `team`, `created_at` | |
 | `deploy_event` | `id` PK, `tenant_id`, `cluster_id`, `namespace`, `name`, `reason`, `message`, `occurred_at` | Index on `(tenant_id, cluster_id, occurred_at)`. |
 | `invites` | `id` PK, `tenant_id` FK, `email` UNIQUE, `role`, `created_at` | Upserted by email (`ON CONFLICT(email) DO UPDATE`); deleted atomically on acceptance (`AcceptInvite`). |
-| `recommendation_outcomes` **(new)** | `id` PK, `tenant_id`, `cluster_id`, `source`, `destination`, `path_class` (unique together), `fix_hint`, `predicted_savings_low/high_inr`, `cost_before_inr`, `first_shown_at`, `last_shown_at`, `applied_at`, `cost_after_inr`, `measured_at` | See §3.11. `cost_before_inr`/predicted savings freeze once `applied_at` is set. |
+| `recommendation_outcomes` | `id` PK, `tenant_id`, `cluster_id`, `source`, `destination`, `path_class` (unique together), `fix_hint`, `predicted_savings_low/high_inr`, `cost_before_inr`, `first_shown_at`, `last_shown_at`, `applied_at`, `cost_after_inr`, `measured_at` | See §3.11. `cost_before_inr`/predicted savings freeze once `applied_at` is set. |
+| `ai_eval_events` **(new)** | `id` PK, `tenant_id`, `feature`, `occurred_at`, `latency_ms`, `success`, `hit_round_limit`, `rounds`, `tool_call_count`, `tool_call_errors`, `prompt_tokens`, `completion_tokens`, `error_message` | Index on `(tenant_id, feature)`. One real row per real chat turn or anomaly-narration call — see §3.20. |
+| `anomaly_alerts` **(new)** | `id` PK, `tenant_id`, `cluster_id`, `detected_at`, `snapshot_reported_at`, `previous_cost_inr`, `current_cost_inr`, `growth_ratio`, `acknowledged_at` | Unique on `(tenant_id, cluster_id, snapshot_reported_at)` — the real dedup key that stops the same still-true anomaly from being re-alerted every tick. See §3.21. |
 
 `users` also gained a `supabase_user_id TEXT` column **(new)**, nullable
 (empty for CLI-provisioned accounts, which keep using
@@ -270,7 +275,7 @@ column name" errors swallowed) except the `settings` table rebuild,
 which detects the old schema via `sqlite_master.sql` and does a real
 `CREATE new → INSERT SELECT → DROP → RENAME` inside one transaction.
 
-### 3.4 Control plane file-by-file (35 files)
+### 3.4 Control plane file-by-file (39 files)
 
 | File | Role |
 |---|---|
@@ -279,11 +284,11 @@ which detects the old schema via `sqlite_master.sql` and does a real
 | `model.go` | Wire structs: `Finding` (14 fields incl. `SavingsLowINR`/`SavingsHighINR`), `DeployEvent`, `IngestRequest` (now carries `Events []DeployEvent`). |
 | `api.go` | `handleIngest` (also calls `store.IngestDeployEvents` best-effort), `handleFindingsAPI`. |
 | `summary_api.go` | `handleDashboardSummary` — response now includes `SpendByTeam`. |
-| `anomaly.go` | `detectAnomalies()` — 2x-growth-ratio detection; now also calls `RecentDeployEvents()` in a 30-minute lookback and attaches `LikelyCause *DeployEvent`. |
+| `anomaly.go` | `detectAnomalies()` — 2x-growth-ratio detection; also calls `RecentDeployEvents()` in a 30-minute lookback and attaches `LikelyCause *DeployEvent`; `Anomaly` now also carries `SnapshotReportedAt` — the real per-snapshot identity `anomaly_watch.go` (§3.21) uses to dedupe alerts. |
 | `budget_api.go` | `handleBudget` — GET/POST, POST gated by `requireAdmin`. |
 | `auth.go` | Middleware: `requireAPIToken`, `requireSession`, `requireAdmin`. |
 | `auth_api.go` | `handleLogin`/`handleLogout`/`handleMe`. |
-| `tenant.go` | `Tenant`/`User`/`Session` structs, `CreateTenant` (atomic tx), `CreateUser`, `CreateAPIToken` (token rotation), `AuthenticateUser` (bcrypt, dummy-hash timing guard), `AuthenticateAPIToken` (SHA-256 lookup), `CreateSession`/`GetSession`/`DeleteSession`. |
+| `tenant.go` | `Tenant`/`User`/`Session` structs, `CreateTenant` (atomic tx), `CreateUser`, `CreateAPIToken` (token rotation), `AuthenticateUser` (bcrypt, dummy-hash timing guard), `AuthenticateAPIToken` (SHA-256 lookup), `CreateSession`/`GetSession`/`DeleteSession`, `AllTenantIDs()` (new — every background loop that must sweep all real tenants, e.g. §3.21, uses this). |
 | `team.go` | `TeamOwnership` CRUD, `extractNamespace()` (RFC-1123-label regex), `computeSpendByTeam()` (pure grouping function). |
 | `team_api.go` | `handleTeams` — GET (any role) / POST+DELETE (admin only via `teamsRoute`). |
 | `deployevent.go` | `IngestDeployEvents()`, `RecentDeployEvents(tenantID, clusterID, since, until)`. |
@@ -295,10 +300,10 @@ which detects the old schema via `sqlite_master.sql` and does a real
 | `invite_api.go` | `handleInvites` — GET/POST/DELETE, all admin-only including GET. |
 | `outcome.go` **(new)** | `RecommendationOutcome`, `RecordRecommendationsShown` (upsert, freezes on applied), `MarkRecommendationApplied`, `measurePendingOutcomes` (the real before/after measurement), `ListRecommendationOutcomes`. |
 | `outcome_api.go` **(new)** | `handleOutcomes` (GET), `handleMarkOutcomeApplied` (POST). |
-| `groq.go` **(new)** | `GroqClient` — OpenAI-compatible chat-completions HTTP client, no SDK dependency. |
+| `groq.go` **(new)** | `GroqClient` — OpenAI-compatible chat-completions HTTP client, no SDK dependency. `Complete()` now also returns a real `CompletionUsage` (prompt/completion tokens) parsed from Groq's own `usage` field, for §3.20. |
 | `chat_tools.go` **(new)** | `buildChatTools` — the 5 real tenant-scoped tools; `parseLenientInt` (works around a real Groq/Llama schema-validation quirk, see §3.12). |
-| `chat_api.go` | `handleChat`, `runChatLoop` (the tool-calling loop, bounded retry). |
-| `anomaly_narrator.go` **(new)** | `narrateAnomaly` — single-completion (no tool-calling) explanation of one real, already-computed `Anomaly`. |
+| `chat_api.go` | `handleChat`, `runChatLoop` (the tool-calling loop, bounded retry) — now returns a real `chatLoopResult` (rounds, tool-call count/errors, token usage, whether it hit the round limit), recorded via `RecordAIEvalEvent` after every real call (§3.20). |
+| `anomaly_narrator.go` **(new)** | `narrateAnomaly` — single-completion (no tool-calling) explanation of one real, already-computed `Anomaly`; also returns real `CompletionUsage` now, recorded the same way (§3.20). |
 | `anomaly_narrator_api.go` | `handleNarrateAnomaly` — `POST /api/v1/anomalies/narrate`, re-derives the anomaly fresh server-side. |
 | `forecast.go` **(new)** | `holtFit`/`holtForecastAhead` (damped-trend generalized Holt), `fitBestHolt`, `backtestMAE` (rolling-origin validation), `ComputeDeepForecast` (the model-selection entry point). |
 | `forecast_api.go` | `handleForecast` — `GET /api/v1/forecast?cluster_id=X`. |
@@ -309,6 +314,10 @@ which detects the old schema via `sqlite_master.sql` and does a real
 | `placement_api.go` **(new)** | `handlePlacementPreview` — `GET /api/v1/placement/preview?groups=N`. |
 | `compaction.go` **(new)** | `CompactFindingsOlderThan` (real day-bucketed rollup + atomic delete), `StartCompactionLoop` (background ticker) — the real retention/compaction fix, §3.18. |
 | `outcome_stats.go` **(new)** | `OutcomeDatasetStats` — real shown/applied/measured counts + mean prediction error over `ListRecommendationOutcomes`, §3.19. |
+| `aieval.go` **(new)** | `RecordAIEvalEvent`, `AIEvalStats` — real per-feature AI telemetry aggregation, §3.20. |
+| `aieval_api.go` **(new)** | `handleAIEvalStats` — `GET /api/v1/ai-eval/stats`. |
+| `anomaly_watch.go` **(new)** | `WatchTenantForNewAnomalies`, `StartAnomalyWatchLoop`, `UnacknowledgedAnomalyAlerts`, `AcknowledgeAnomalyAlert` — real proactive anomaly detection, §3.21. |
+| `anomaly_watch_api.go` **(new)** | `handleAnomalyAlerts` (GET), `handleAcknowledgeAnomalyAlert` (POST). |
 
 ### 3.5 Control plane dependencies (`go.mod`, exact versions)
 
@@ -319,7 +328,7 @@ own transitive requirements (libc, mathutil, memory, bigfft, etc.) plus
 dependencies — it's a plain `net/http` client against Groq's
 OpenAI-compatible REST API, not an SDK.
 
-### 3.6 Control plane test inventory — 167 test functions across 26 files
+### 3.6 Control plane test inventory — 189 test functions across 30 files
 
 | File | Approx. tests | Covers |
 |---|---|---|
@@ -336,13 +345,15 @@ OpenAI-compatible REST API, not an SDK.
 | `invite_test.go` + `invite_api_test.go` | 14 | Upsert-replace semantics, role validation, revoke, join-via-invite, tenant isolation, admin-only-including-GET |
 | `outcome_test.go` + `outcome_api_test.go` | 14 | Shown/freeze-on-applied upsert, idempotent apply, real cost-after measurement (both "fixed" and "flow gone" cases), tenant isolation |
 | `outcome_stats_test.go` + additions to `outcome_api_test.go` **(new)** | 6 | All-zero honest state with no data, shown-without-applied leaves the mean prediction error `nil` (not fabricated 0), a real computed mean prediction error against a known predicted-vs-actual gap, tenant isolation at both the store and API layer |
-| `chat_test.go` | 12 | Groq client against a fake server, the tool-calling loop (success/unknown-tool/max-rounds/retry), tenant-scoped tool isolation, `parseLenientInt`, the full HTTP handler |
-| `anomaly_narrator_test.go` | 6 | Prompt grounding (with/without a real likely cause), 503/404/tenant-isolation at the API layer |
+| `chat_test.go` | 14 | Groq client against a fake server (including real token-usage parsing), the tool-calling loop (success/unknown-tool/max-rounds/retry, now also asserting real `Rounds`/`ToolCallCount`/`ToolCallErrors`/`HitRoundLimit`), tenant-scoped tool isolation, `parseLenientInt`, the full HTTP handler, and that `handleChat` records a real ai-eval event on both success and Groq failure |
+| `anomaly_narrator_test.go` | 6 | Prompt grounding (with/without a real likely cause), 503/404/tenant-isolation at the API layer; the end-to-end test now also asserts `handleNarrateAnomaly` records a real ai-eval event |
 | `forecast_test.go` | 11 | Synthetic linear series picks plain Holt / synthetic plateauing series picks damped Holt (both asserted via real measured MAE), honest zero-fold fallback with too little history, damped-never-exceeds-undamped invariant, a real wall-clock budget at 4,200-point production scale, API layer (400/tenant-isolation/end-to-end) |
 | `summary_test.go` | 5 | Pure Go aggregation functions cross-checked against the same fixtures/expected values as the original SQL-based `Summary`/`SpendByClass`/`SpendByCloud` tests in `store_test.go` |
 | `remediation_test.go` + `remediation_api_test.go` | 9 | Each qualifying/disqualifying policy reason checked individually, a real no-mutation guarantee, API-layer tenant isolation |
 | `placement_test.go` + `placement_api_test.go` | 15 | Synthetic graphs with analytically-known-correct answers (disconnected pairs, a triangle, a 4-workload/2-pair case proving the algorithm finds the mathematically best co-location, not just *a* local optimum), a real wall-clock budget at 100-workload scale, API layer |
-| `compaction_test.go` **(new)** | 8 | Real sum/`sample_count` correctness folding multiple raw rows into one rollup, recent rows left untouched, idempotent re-run over already-compacted data, separate real calendar days never merged, tenant isolation, the `WorkloadCostGrowth`-survives-compaction integration test, a real no-op guard when nothing is old enough yet |
+| `compaction_test.go` | 8 | Real sum/`sample_count` correctness folding multiple raw rows into one rollup, recent rows left untouched, idempotent re-run over already-compacted data, separate real calendar days never merged, tenant isolation, the `WorkloadCostGrowth`-survives-compaction integration test, a real no-op guard when nothing is old enough yet |
+| `aieval_test.go` + `aieval_api_test.go` **(new)** | 6 | Empty-with-no-events state, real per-feature aggregation (success rate, avg latency, tool success rate, token sums) against known inputs, tenant isolation at both the store and API layer, wrong-method rejection |
+| `anomaly_watch_test.go` + `anomaly_watch_api_test.go` **(new)** | 14 | A real new alert recorded and idempotent across repeated ticks with no new data, a genuinely new alert after a fresh anomalous snapshot, no alert when growth is below threshold, acknowledge removes it from the unacknowledged list (idempotently), 404 for an unknown alert ID, tenant isolation, `AllTenantIDs`, API-layer coverage of all of the above |
 
 Two new tests in `store_test.go` guard the WAL/connection-pool change
 specifically: `TestOpenStoreConnectionsShareRealDataAgainstAFile` (8 real
@@ -350,8 +361,8 @@ concurrent connections against a real file all see the same real
 ingested row) and the `:memory:`-stays-single-connection guard baked
 into `OpenStore` itself.
 
-Run: `cd controlplane && go test ./...` — **all 167 passing** (re-verified
-2026-08-02, `go test -race` clean), ~150-170s wall time under `-race`
+Run: `cd controlplane && go test ./...` — **all 189 passing** (re-verified
+2026-08-03, `go test -race` clean), ~190-200s wall time under `-race`
 depending on cache (several tests use real 1.1s sleeps to get distinct
 `reported_at` second-granularity timestamps).
 
@@ -974,11 +985,112 @@ operators using it day-to-day yet — exactly the gap §9 already named.
 real shown/applied/measured counts and the honest empty state
 (22/22 E2E, up from 21/21).
 
+### 3.20 Real AI evaluation telemetry (`aieval.go`/`aieval_api.go`)
+
+Direct response to an external review's fair criticism: this project has
+two real AI features (the chat assistant, the anomaly narrator) and,
+until now, zero visibility into whether either one actually works —
+success rate, latency, tool-call reliability, token cost. "We have AI"
+with no evaluation data behind it is exactly the gap called out, and
+it's a real, buildable gap: unlike outcome data or customer proof, this
+doesn't need real customers, only real requests this control plane
+already makes to Groq.
+
+**What's captured, per real request, not sampled**: `groq.go`'s
+`Complete()` now parses and returns the real `usage` field Groq's
+OpenAI-compatible API already sends back (prompt/completion tokens) —
+previously received and silently discarded. `chat_api.go`'s
+`runChatLoop` now returns a real `chatLoopResult` accounting for the
+whole turn: how many completion rounds it took, how many tool calls it
+made and how many of those errored, summed real token usage across every
+round, and whether it had to give up at `maxChatToolRounds` instead of
+converging. `handleChat` and `handleNarrateAnomaly` both record one real
+`AIEvalEvent` per request (best-effort, same non-blocking pattern as
+`RecordRecommendationsShown` — a telemetry write failure must never take
+down the actual feature it's observing).
+
+`AIEvalStats(tenantID)` aggregates real events per feature: success
+rate, average latency, tool-call success rate (a real pointer, not a
+fabricated 0, when a feature has made zero real tool calls to average),
+and total token cost. `GET /api/v1/ai-eval/stats` exposes it; a new
+panel on the Assistant page (natural home) renders it, with an explicit
+honest empty state ("No AI requests recorded yet") rather than a
+misleading 0%.
+
+**Verified against the real, live Groq API, not just a fake test
+server**: sent a real chat message to the live deployment and confirmed
+`GET /api/v1/ai-eval/stats` recorded it accurately —
+`{"total_requests":1,"success_count":1,"success_rate":1,"avg_latency_ms":2950,"total_tool_calls":1,"tool_success_rate":1,"total_prompt_tokens":3752,"total_completion_tokens":114}` —
+real token counts from the actual Groq response, not estimated.
+Screenshotted rendering correctly on the live Assistant page.
+
+8 new Go tests across `aieval_test.go`/`aieval_api_test.go` plus
+additions to `chat_test.go`/`anomaly_narrator_test.go` (real token-usage
+parsing, real per-round telemetry accumulation, real event recording on
+both success and failure), full suite green (189 tests). 1 new E2E test
+asserting the honest empty state (this suite never sets `GROQ_API_KEY`,
+so zero real events is the actual truth, not an untested path).
+
+### 3.21 Real proactive anomaly detection (`anomaly_watch.go`/`anomaly_watch_api.go`)
+
+Direct response to another fair external criticism: anomaly detection
+(`detectAnomalies`, §3.1) already existed but was 100% pull — a real
+anomaly could sit undetected-by-anyone until an operator happened to
+open the Anomalies page or ask the chat assistant. "AI should notice,
+not just answer" is a real, buildable gap here, using data that already
+exists, not a new capability that needs new infrastructure.
+
+**How it works**: `WatchTenantForNewAnomalies(tenantID)` runs the exact
+same existing `detectAnomalies` against every real cluster a tenant has,
+and records a real new row in `anomaly_alerts` for any anomaly not
+already captured for that exact snapshot. The real dedup key is
+`(tenant_id, cluster_id, snapshot_reported_at)` — `Anomaly` gained a new
+`SnapshotReportedAt` field (the real timestamp of the "current" snapshot
+the anomaly was computed from) specifically so a still-true anomaly
+(nothing new has happened, just still above the same old snapshot)
+never gets re-alerted on every tick; only a genuinely fresh snapshot
+crossing the threshold counts as new. `StartAnomalyWatchLoop` runs this
+for every real tenant (`AllTenantIDs()`, new on `tenant.go`) on a
+recurring tick — 5 minutes by default, tunable via
+`CHIDRIXX_ANOMALY_WATCH_INTERVAL` (used to tighten this to 2s for the
+E2E suite, so a real test can observe a real tick without waiting 5 real
+minutes).
+
+`GET /api/v1/anomalies/alerts` lists real unacknowledged alerts; `POST
+.../acknowledge` dismisses one (idempotent — re-acknowledging is a
+no-op, not an error, same pattern as `MarkRecommendationApplied`). A new
+`AnomalyAlertBell.tsx` in the Topbar (visible on every page, not just
+Anomalies) polls this every 15s and shows a real unread-count badge,
+with a dropdown listing each real alert and a dismiss button.
+
+**Verified live against real production data**: deployed with the
+5-minute default; the pod's own log line confirms it's running
+("proactive anomaly watch enabled: checking every 5m0s..."); `GET
+/api/v1/anomalies/alerts` honestly returns `[]` on the live cluster right
+now (no real cost anomaly currently exists there), screenshotted showing
+"No new anomalies since the last check" rather than a fabricated alert.
+End-to-end correctness (a real anomaly actually gets detected and
+surfaced) was verified via a dedicated real E2E test rather than left
+to unit tests alone, ingesting two real snapshots with a genuine 10x
+jump on an isolated cluster ID and confirming the bell surfaces it
+within one real background tick.
+
+14 new Go tests across `anomaly_watch_test.go`/`anomaly_watch_api_test.go`
+(idempotency across repeated ticks, a genuinely new alert after a fresh
+snapshot, below-threshold no-op, acknowledge idempotency, tenant
+isolation, `AllTenantIDs`), full suite green. 2 new E2E tests (real
+detection end-to-end, and that an acknowledged alert stays gone across a
+later real tick) — 27/27 E2E, up from 24/24. One real, deliberate
+cross-file dependency, same discipline as this suite already uses for
+shared global state: the Cost Graph edge-count test now expects 3 real
+edges instead of 2, since the anomaly test's own fixture is a genuine
+new real edge, not a stale count left unfixed.
+
 ---
 
 ## 4. Frontend — component inventory
 
-36 `.tsx` files + 10 `.ts` files (excluding `.d.ts`), 5,258 lines in
+37 `.tsx` files + 10 `.ts` files (excluding `.d.ts`), 5,488 lines in
 `src/` — re-counted directly against the tree, not carried forward from
 an earlier session's number. Separately, `e2e/` holds 10 more `.ts`
 files (the committed Playwright suite, §3.10 — a distinct concern from
@@ -1000,28 +1112,30 @@ Anomalies, History, Reports, Automations, Settings.
 
 | File | Role |
 |---|---|
-| `AssistantPage.tsx` | The real Groq-backed chat assistant UI (§3.11) — message list, suggestion chips, calls `POST /api/v1/chat` |
+| `AssistantPage.tsx` | The real Groq-backed chat assistant UI (§3.11) — message list, suggestion chips, calls `POST /api/v1/chat`; now also renders a real AI-evaluation panel (§3.20) fetching `GET /api/v1/ai-eval/stats` |
 | `DeepForecastCard.tsx` | The real backtested-model forecast UI (§3.14) — per-cluster selector, calls `GET /api/v1/forecast` |
 | `CostGraphPage.tsx` + `graphLayout.ts` | Node-link topology; dependency-free force-relaxation layout, builds nodes/edges client-side from `/api/v1/findings` |
 | `HistoryPage.tsx` | Fetches `/api/v1/workload-growth`, renders ranked list + per-workload sparkline + correlated-event note |
 | `TeamsPage.tsx` | Fetches/mutates `/api/v1/teams` (spend-by-team + namespace-ownership CRUD) **and** `/api/v1/invites` (§3.9's `MembersCard` — admin-only invite form + pending-invite table) |
 | `PredictiveDriverCard.tsx` | Fetches `/api/v1/workload-growth`, reuses `holtForecast()` from `forecast.ts` to determine trend direction |
-| `LoginPage.tsx` | Real Supabase `signUp`/`signInWithPassword` (§3.9), sign-in/sign-up toggle, honest "check your email" pending state |
+| `LoginPage.tsx` | Real Supabase `signUp`/`signInWithPassword` (§3.9), sign-in/sign-up toggle, honest "check your email" pending state; a third real "Sign in with username" mode (a real bug fix — see §3.8 item 8) posts straight to the cookie-session `POST /api/v1/auth/login` for self-hosted/CLI accounts, which previously had no browser-visible way to authenticate at all |
 | `apiFetch.ts` | Single chokepoint attaching a Supabase bearer token to every authenticated frontend call |
 | `supabaseClient.ts` | Real `createClient(url, publishableKey)`, fails loudly if env vars are missing rather than silently degrading |
 | `session.ts` | `SessionContext`/`Session` type shared across the app |
 | `PlacementSimulatorCard.tsx` | The real offline placement-optimization UI (§3.17) — zone-count selector, calls `GET /api/v1/placement/preview`, rendered on Cost Graph |
+| `AnomalyAlertBell.tsx` **(new)** | The real proactive-detection UI (§3.21) — a Topbar bell (every page, not just Anomalies) polling `GET /api/v1/anomalies/alerts` every 15s, unread-count badge, dismiss via `POST .../acknowledge` |
 
 ### 4.3 Frontend build output (measured, current — rebuilt as part of this update)
 
 ```
-dist/assets/index-*.js               1,120.75 kB  (328.46 kB gzip)
-dist/assets/index-*.css                 20.20 kB  (5.47 kB gzip)
+dist/assets/index-*.js               1,123.39 kB  (329.00 kB gzip)
+dist/assets/index-*.css                 20.47 kB  (5.52 kB gzip)
 dist/assets/AutomationsPage-*.js          9.02 kB  (2.53 kB gzip)
 dist/assets/CostGraphPage-*.js            9.16 kB  (3.28 kB gzip)
 dist/assets/FeaturePages-*.js             8.58 kB  (3.10 kB gzip)
+dist/assets/AssistantPage-*.js            5.94 kB  (2.25 kB gzip)
 dist/assets/TeamsPage-*.js                7.83 kB  (2.10 kB gzip)
-+ 7 more page chunks, 1.5-4kB each
++ 6 more page chunks, 1.5-4kB each
 ```
 
 Code-split (§8, closed): only Overview + Sidebar ship in the main
@@ -1075,13 +1189,17 @@ fields), `templates/deployment.yaml` (`CHIDRIXX_ADMIN_USER`/
 ingest token + the `create-tenant`/`create-user`/`create-token` exec
 commands), `templates/_helpers.tpl`.
 
-### 5.2 Live cluster state (k3d, as of this document — re-verified 2026-08-03 post-retention/compaction)
+### 5.2 Live cluster state (k3d, as of this document — re-verified 2026-08-03 post-AI-eval/proactive-anomaly-watch)
 
 - Namespace `chidrixx`: `chidrixx-controlplane` Deployment (Helm
   revision **8**), image `chidrixx-controlplane:dev` (rebuilt and
-  `k3d image import`ed again today for §3.18/§3.19 — no registry push
-  needed for local iteration), PVC-backed SQLite, `GROQ_API_KEY` wired
-  via the `chidrixx-controlplane-groq-key` secret (§3.11).
+  `k3d image import`ed several more times today for the login-form fix,
+  §3.20, and §3.21 — no registry push needed for local iteration),
+  PVC-backed SQLite, `GROQ_API_KEY` wired via the
+  `chidrixx-controlplane-groq-key` secret (§3.11). Pod logs confirm all
+  three background loops are live: WAL mode, the compactor, and now the
+  proactive anomaly watch (`checking every 5m0s for new real anomalies
+  per tenant`).
 - Namespace `kharcha`: `kharcha-kharcha` DaemonSet (Helm revision 5,
   unchanged today), image `chidrixx-agent:dev`, real ingest token issued
   via `create-token` and stored in the `kharcha-controlplane-token`
@@ -1110,6 +1228,15 @@ commands), `templates/_helpers.tpl`.
   WAL — consistent with real, continuous ingestion over multiple days,
   not a synthetic fixture. This will stop growing unboundedly once real
   data starts crossing the 30-day retention window (§3.18).
+- **§3.20 verified against the real Groq API, not a fixture**: sent one
+  real chat message through the live deployment; `GET
+  /api/v1/ai-eval/stats` recorded it accurately (100% success, 2,950ms
+  latency, 1 real tool call succeeded, 3,752 prompt + 114 completion
+  real tokens). **§3.21 verified honestly**: `GET
+  /api/v1/anomalies/alerts` correctly returns `[]` on the live
+  cluster — no real cost anomaly currently exists there, and the UI
+  shows that truthfully ("No new anomalies since the last check")
+  rather than a fabricated alert.
 
 ---
 
@@ -1370,6 +1497,17 @@ CLI-provisioned accounts had no way to sign in through the browser at
 all, only the Supabase email form, caught by actually trying to log in
 on the live site rather than by any test — is now fixed, with two new
 E2E tests driving the real rendered form so it can't silently regress.
+Real AI evaluation telemetry (§3.20) closes a fair external gap — two
+real AI features existed with zero visibility into whether either
+actually worked; success rate, tool-call reliability, latency, and real
+token cost are now measured per request and verified against the actual
+live Groq API, not a fixture. Real proactive anomaly detection (§3.21)
+closes another — anomaly detection was 100% pull before; a background
+loop now checks every real tenant on a recurring tick and surfaces new
+anomalies through a Topbar bell on every page, not just when an operator
+happens to ask, verified end-to-end with a real ingested anomaly in the
+E2E suite and honestly showing nothing on the live cluster where none
+currently exists.
 
 What's genuinely left, in priority order (§8): a real second-cloud agent
 deployment is blocked on a real, non-technical wall (India's GCP billing

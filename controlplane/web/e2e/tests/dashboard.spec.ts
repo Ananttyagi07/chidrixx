@@ -30,8 +30,12 @@ test("Cost Graph renders the real topology with no fabricated latency field", as
   await page.goto("/");
   await page.getByText("Cost Graph").click();
   // globalSetup ingests 2 real distinct edges (checkout->redis cross_az,
-  // checkout->203.0.113.5 internet_egress).
-  await expect(page.locator("svg line")).toHaveCount(2, { timeout: 10_000 });
+  // checkout->203.0.113.5 internet_egress); anomaly-watch.spec.ts adds a
+  // real 3rd (watched-service->watched-dest, same_node, on its own
+  // isolated cluster) -- the cost graph draws every real ingested edge
+  // tenant-wide, not filtered by path_class like placement/remediation
+  // are, so this real count grows when that fixture's data is present.
+  await expect(page.locator("svg line")).toHaveCount(3, { timeout: 10_000 });
 
   const body = await page.locator("body").innerText();
   expect(body).not.toContain("Latency");
