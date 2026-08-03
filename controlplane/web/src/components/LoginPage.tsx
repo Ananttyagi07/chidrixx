@@ -11,9 +11,10 @@ import { apiFetch } from "../apiFetch";
 // so signup and "check your email" are a real, separate state here, not
 // glossed over as an instant login.
 export function LoginPage({ onLoggedIn }: { onLoggedIn: (session: Session) => void }) {
-  const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in");
+  const [mode, setMode] = useState<"sign-in" | "sign-up" | "username-login">("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [confirmationSent, setConfirmationSent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -79,6 +80,43 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: (session: Session) => vo
     }
   }
 
+  // The real backend cookie-session path (POST /api/v1/auth/login,
+  // controlplane/auth.go's requireSession cookie fallback) -- entirely
+  // separate from Supabase, for accounts provisioned via the
+  // create-tenant/create-user CLI (self-hosted installs, or any tenant
+  // that hasn't opted into Supabase-backed signup). Without this, those
+  // accounts had no way to authenticate through the browser at all: the
+  // backend has always supported cookie sessions (App.tsx's own session-
+  // resolution comment says so directly), but until now the only way to
+  // get one was a raw curl POST, never a real visible form.
+  async function handleUsernameLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/v1/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!res.ok) {
+        setError(res.status === 401 ? "Invalid username or password." : `Login failed (HTTP ${res.status}).`);
+        return;
+      }
+      const meRes = await apiFetch("/api/v1/auth/me");
+      if (!meRes.ok) {
+        setError(`Signed in, but the control plane rejected the session (HTTP ${meRes.status}).`);
+        return;
+      }
+      const session: Session = await meRes.json();
+      onLoggedIn(session);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   if (confirmationSent) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--page)] px-6">
@@ -102,6 +140,76 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: (session: Session) => vo
             Back to sign in
           </button>
         </motion.div>
+      </div>
+    );
+  }
+
+  if (mode === "username-login") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--page)] px-6">
+        <motion.form
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          onSubmit={handleUsernameLogin}
+          className="flex w-full max-w-sm flex-col gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--card-shadow)]"
+        >
+          <div>
+            <div className="text-lg font-semibold text-[var(--ink)]">Sign in with username</div>
+            <div className="mt-1 text-xs text-[var(--ink-muted)]">
+              For self-hosted admin accounts provisioned via the create-tenant/create-user CLI, not
+              a Supabase account.
+            </div>
+          </div>
+
+          <label className="flex flex-col gap-1 text-xs text-[var(--ink-secondary)]">
+            Username
+            <input
+              autoFocus
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="rounded-lg border border-[var(--border)] bg-[var(--page)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+              autoComplete="username"
+            />
+          </label>
+
+          <label className="flex flex-col gap-1 text-xs text-[var(--ink-secondary)]">
+            Password
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="rounded-lg border border-[var(--border)] bg-[var(--page)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+              autoComplete="current-password"
+            />
+          </label>
+
+          {error && (
+            <div className="rounded-lg border border-[var(--status-critical)]/40 bg-[var(--status-critical)]/10 px-3 py-2 text-xs text-[var(--status-critical)]">
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={submitting || !username || !password}
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {submitting ? "Working…" : "Sign in"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setMode("sign-in");
+              setError(null);
+            }}
+            className="text-center text-xs text-[var(--ink-muted)] hover:text-[var(--accent)]"
+          >
+            Back to email sign-in
+          </button>
+        </motion.form>
       </div>
     );
   }
@@ -173,6 +281,19 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: (session: Session) => vo
         >
           {mode === "sign-in" ? "Need an account? Sign up" : "Already have an account? Sign in"}
         </button>
+
+        {mode === "sign-in" && (
+          <button
+            type="button"
+            onClick={() => {
+              setMode("username-login");
+              setError(null);
+            }}
+            className="text-center text-xs text-[var(--ink-muted)] hover:text-[var(--accent)]"
+          >
+            Self-hosted admin? Sign in with username instead
+          </button>
+        )}
       </motion.form>
     </div>
   );

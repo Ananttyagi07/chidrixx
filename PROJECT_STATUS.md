@@ -40,7 +40,7 @@ chidrixx/
 │       ├── kharcha/     the eBPF agent binary          — 12 test files, 26 test functions
 │       └── loadgen/     load-test traffic generator (no tests)
 ├── controlplane/        module `chidrixx-controlplane` — 5,122 lines Go (excl. tests), 35 files
-│   ├── web/             React/Vite/TS dashboard SPA    — 5,137 lines TS/TSX, 36 .tsx + 10 .ts files
+│   ├── web/             React/Vite/TS dashboard SPA    — 5,258 lines TS/TSX, 36 .tsx + 10 .ts files
 │   └── e2e/             committed Playwright E2E suite — 10 .ts files (§3.10)
 ├── bpf/                 flow_cgroup.c + compiled flow_cgroup.o (committed binary, go:embed'd)
 ├── pricebook/            aws.yaml, gcp.yaml — real cited price data
@@ -49,7 +49,7 @@ chidrixx/
 └── .github/workflows/   ci.yml — 7 jobs, both modules (§6)
 ```
 
-Total: **~13,400 lines** of hand-written Go + TypeScript across both
+Total: **~13,500 lines** of hand-written Go + TypeScript across both
 modules and the frontend (not counting vendored react-bits `.jsx`/`.css`
 files, which are third-party, installed via the real `shadcn` CLI; not
 counting the separate 10-file E2E suite). All four counts above were
@@ -469,6 +469,27 @@ everything else in this document.
    `CreateAPIToken` + the `controlplane create-token --tenant-id N` CLI
    subcommand, then using it to issue a real replacement and confirming
    ingest succeeded again.
+8. **Cookie/CLI accounts could reach the dashboard, but never sign
+   in to it — caught live, by hand, not by a test.** §3.9's fix made
+   `App.tsx`'s session check work for cookie sessions on page load, but
+   `LoginPage.tsx`'s actual form was, and had remained, Supabase email/
+   password only (`type="email"`, `supabase.auth.signInWithPassword`) —
+   there was never a visible way to *create* a cookie session through
+   the browser at all. A real self-hosted/CLI-provisioned username typed
+   into that field was rejected by the browser's own HTML5 validation
+   ("Please include an '@'") before any app code even ran. Every E2E
+   auth test (§3.10) exercises the cookie path via `context.request.post`
+   directly, bypassing the real form entirely, so this never surfaced in
+   CI — only found by actually trying to log in through the live browser
+   UI. Fixed by adding a real "Sign in with username instead" mode to
+   `LoginPage.tsx` that posts straight to `POST /api/v1/auth/login`
+   (§3.9's own already-correct backend path) and resolves the session the
+   same way the Supabase flow does — plus two new E2E tests that fill out
+   and submit the actual rendered form, not the API directly, so this
+   class of bug can't silently return (24/24 E2E now, up from 22/22).
+   Verified live: a real browser, no stored cookies, going landing page →
+   "Sign in with username instead" → real `verify-fix` credentials →
+   real dashboard, screenshotted at each step.
 
 ### 3.9 Real Supabase-backed signup/login + self-service team invites
 
@@ -510,6 +531,14 @@ back to the legacy cookie path when there isn't one.
   CLI-provisioned tenant) completely unreachable through the dashboard.
   Caught while designing the E2E auth tests (§3.10), fixed by always
   calling `/api/v1/auth/me` unconditionally on load.
+- **A second, related real bug, caught later by actually using the live
+  site, not by any test**: fixing the session *check* above didn't fix
+  the session *creation* path — `LoginPage.tsx` had no UI at all for
+  logging in with a cookie/CLI username, only the Supabase email form.
+  See §3.8 item 8 for the full story and the fix (a real "Sign in with
+  username instead" mode, backed by the existing `POST
+  /api/v1/auth/login`, plus two new E2E tests that drive the actual
+  rendered form).
 
 ### 3.10 Real Playwright E2E suite (`controlplane/web/e2e/`)
 
@@ -949,7 +978,7 @@ real shown/applied/measured counts and the honest empty state
 
 ## 4. Frontend — component inventory
 
-36 `.tsx` files + 10 `.ts` files (excluding `.d.ts`), 5,137 lines in
+36 `.tsx` files + 10 `.ts` files (excluding `.d.ts`), 5,258 lines in
 `src/` — re-counted directly against the tree, not carried forward from
 an earlier session's number. Separately, `e2e/` holds 10 more `.ts`
 files (the committed Playwright suite, §3.10 — a distinct concern from
@@ -986,7 +1015,7 @@ Anomalies, History, Reports, Automations, Settings.
 ### 4.3 Frontend build output (measured, current — rebuilt as part of this update)
 
 ```
-dist/assets/index-*.js               1,118.04 kB  (328.14 kB gzip)
+dist/assets/index-*.js               1,120.75 kB  (328.46 kB gzip)
 dist/assets/index-*.css                 20.20 kB  (5.47 kB gzip)
 dist/assets/AutomationsPage-*.js          9.02 kB  (2.53 kB gzip)
 dist/assets/CostGraphPage-*.js            9.16 kB  (3.28 kB gzip)
@@ -1336,7 +1365,11 @@ conserving) before ever touching the live system. Real outcome-dataset-
 health visibility (§3.19) makes the recommendation-outcomes dataset's
 actual maturity trackable — honestly still 26 shown/0 applied/0 measured
 on the live cluster, because that gap needs real operators over real
-time, not more code.
+time, not more code. A real login-form bug (§3.8 item 8) — self-hosted/
+CLI-provisioned accounts had no way to sign in through the browser at
+all, only the Supabase email form, caught by actually trying to log in
+on the live site rather than by any test — is now fixed, with two new
+E2E tests driving the real rendered form so it can't silently regress.
 
 What's genuinely left, in priority order (§8): a real second-cloud agent
 deployment is blocked on a real, non-technical wall (India's GCP billing

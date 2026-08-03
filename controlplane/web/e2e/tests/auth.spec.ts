@@ -29,6 +29,36 @@ test("wrong password is rejected with a real 401, not silently accepted", async 
   expect(res.status()).toBe(401);
 });
 
+test("a self-hosted admin can actually sign in through the real visible username-login form", async ({ page }) => {
+  // Real UI form fill, not context.request.post like loginAsAdmin above --
+  // this is the exact gap a real user hit: the default login form is
+  // Supabase email/password only (type="email"), so a CLI-provisioned
+  // username had no way in through the browser at all. Exercises the
+  // actual rendered "Sign in with username instead" path end to end.
+  await page.goto("/");
+  await page.getByText("View live dashboard").click();
+  await page.getByText("Self-hosted admin? Sign in with username instead").click();
+  await expect(page.getByText("Sign in with username")).toBeVisible();
+
+  await page.getByLabel("Username").fill(ADMIN_USER);
+  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  await expect(page.getByText("Overview")).toBeVisible({ timeout: 10_000 });
+});
+
+test("the real username-login form rejects a wrong password with a visible error, not a silent failure", async ({ page }) => {
+  await page.goto("/");
+  await page.getByText("View live dashboard").click();
+  await page.getByText("Self-hosted admin? Sign in with username instead").click();
+
+  await page.getByLabel("Username").fill(ADMIN_USER);
+  await page.getByLabel("Password").fill("definitely-not-the-real-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  await expect(page.getByText("Invalid username or password.")).toBeVisible({ timeout: 5_000 });
+});
+
 test("logout clears the real session and returns to landing", async ({ page, context }) => {
   await loginAsAdmin(context);
   await page.goto("/");
