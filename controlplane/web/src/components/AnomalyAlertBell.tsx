@@ -63,15 +63,21 @@ export function AnomalyAlertBell() {
   return (
     <div className="relative">
       <motion.button
-        whileTap={{ scale: 0.96 }}
-        whileHover={{ y: -1 }}
+        whileTap={{ scale: 0.94 }}
         onClick={() => setOpen((o) => !o)}
-        className="relative flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1.5 text-[var(--ink-secondary)] shadow-[var(--card-shadow)]"
+        className="relative flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--ink-secondary)]"
         title="Proactively detected anomalies"
       >
+        {alerts.length > 0 && (
+          <motion.span
+            className="absolute inset-0 rounded-full border border-[var(--ink)]"
+            animate={{ scale: [1, 1.45], opacity: [0.5, 0] }}
+            transition={{ duration: 2, repeat: Infinity, ease: "easeOut" }}
+          />
+        )}
         <IconBell className="h-4 w-4" />
         {alerts.length > 0 && (
-          <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[var(--status-critical)] px-1 text-[0.6rem] font-semibold text-white">
+          <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-[0.875rem] items-center justify-center rounded-full bg-[var(--ink)] px-1 text-[0.55rem] font-semibold text-[var(--surface)]">
             {alerts.length}
           </span>
         )}

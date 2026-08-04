@@ -5,20 +5,43 @@
 
 :root {
   color-scheme: light;
-  --page: #f4f6f8;
+  /* "The HAL principle" (see web/DESIGN_VISION.md §3.1): the chrome is
+     near-monochrome -- warm off-white/paper/ink only. Color is reserved
+     entirely for real computed data (path-class series, real status),
+     never for decoration or an "accent" identity. No glow, no gradient,
+     no colored shadow anywhere in this token set. */
+  --page: #fafaf8;
   --surface: #ffffff;
-  --surface-sunken: #f7f8fa;
-  --ink: #101418;
-  --ink-secondary: #5b6472;
-  --ink-muted: #8993a6;
-  --gridline: #eceef1;
-  --baseline: #d7dbe0;
-  --border: rgba(16, 20, 24, 0.12);
-  --card-shadow: 0 1px 1px rgba(16, 20, 24, 0.03), 0 6px 16px -4px rgba(16, 20, 24, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  --accent: #1baf7a;
-  --accent-wash: rgba(27, 175, 122, 0.1);
+  --surface-sunken: #f3f2ed;
+  /* A real, visible mid-grey band -- for alternating section
+     backgrounds on marketing-style pages (the landing page), so grey
+     actually reads as a used shade, not just a whisper of off-white. */
+  --surface-grey: #eae8e1;
+  --ink: #16160f;
+  --ink-secondary: #4a4940;
+  --ink-muted: #8a8779;
+  --ink-faint: #c2bfb2;
+  --gridline: #e9e7e0;
+  --baseline: #d6d3c7;
+  --border: rgba(22, 22, 15, 0.1);
+  --card-shadow: 0 1px 2px rgba(22, 22, 15, 0.05), 0 4px 10px rgba(22, 22, 15, 0.04);
+  /* The "accent" is ink itself -- a primary button is just ink-on-paper,
+     not a separate brand color. */
+  --accent: #16160f;
+  --accent-wash: rgba(22, 22, 15, 0.06);
 
+  /* Reserved real-signal colors -- deliberately NOT desaturated. This is
+     the dataviz skill's own validated categorical palette (references/
+     palette.md): a real, computed pass on lightness band, chroma floor,
+     CVD separation, and normal-vision floor. A hand-muted attempt at
+     these exact hues was tried and FAILED the validator (chroma-floor
+     and CVD-separation checks) -- re-verified by running
+     scripts/validate_palette.js, not eyeballed. The "HAL principle" (§3.1
+     of DESIGN_VISION.md) means color is reserved for real data, and this
+     is exactly that real data -- muting it further would trade real
+     accessibility for a look, which is the wrong trade. Only the chrome
+     above (page/surface/ink/accent/border) was changed for the new
+     monochrome direction; these stay as validated. */
   --series-blue: #2a78d6;
   --series-orange: #eb6834;
   --series-aqua: #1baf7a;
@@ -65,4 +88,23 @@
 body {
   background: var(--page);
   color: var(--ink);
+}
+
+/* A real, embossed 3D heading treatment: a grey gradient front face plus
+   a stack of crisp (zero-blur) same-direction offset shadows to build a
+   solid extruded depth underneath it -- no glow, no blur, every layer is
+   a flat, precise shade, same discipline as the rest of this stylesheet. */
+.text-3d-grey {
+  background: linear-gradient(180deg, #4a4940 0%, #16160f 55%, #050503 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  text-shadow:
+    0 1px 0 #d6d3c7,
+    0 2px 0 #cbc8bd,
+    0 3px 0 #c0bdb0,
+    0 4px 0 #b5b2a4,
+    0 5px 0 #aaa798,
+    0 6px 1px rgba(22, 22, 15, 0.15);
 }

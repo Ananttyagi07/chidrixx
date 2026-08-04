@@ -36,7 +36,7 @@ const ScrollFloat = ({
 
     const charElements = el.querySelectorAll('.char');
 
-    gsap.fromTo(
+    const tween = gsap.fromTo(
       charElements,
       {
         willChange: 'opacity, transform',
@@ -63,6 +63,38 @@ const ScrollFloat = ({
         }
       }
     );
+
+    // A scrubbed ScrollTrigger computes its start/end pixel positions once,
+    // against whatever the surrounding layout measures at the moment this
+    // effect runs -- real, reproducible bug found live: real async layout
+    // settling shortly after mount (a chart library's ResponsiveContainer
+    // measuring itself via ResizeObserver a frame or two late, font
+    // swap-in, etc.) leaves the cached trigger positions stale, freezing
+    // the scrub partway through its character reveal (a garbled
+    // half-revealed title) until a real scroll event happens to force
+    // GSAP to recompute. Rather than guess a fixed delay, watch real
+    // layout with a real ResizeObserver on the document body and refresh
+    // ScrollTrigger whenever it actually fires, for a bounded window after
+    // mount (2s -- generous next to real observed settle times, then
+    // disconnected so this isn't a permanent per-title observer).
+    const raf = requestAnimationFrame(() => ScrollTrigger.refresh());
+    const settleTimers = [200, 600, 1200].map((ms) => setTimeout(() => ScrollTrigger.refresh(), ms));
+    const onLoad = () => ScrollTrigger.refresh();
+    window.addEventListener('load', onLoad, { once: true });
+
+    const resizeObserver = new ResizeObserver(() => ScrollTrigger.refresh());
+    resizeObserver.observe(document.body);
+    const stopObserving = setTimeout(() => resizeObserver.disconnect(), 2000);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      settleTimers.forEach(clearTimeout);
+      clearTimeout(stopObserving);
+      resizeObserver.disconnect();
+      window.removeEventListener('load', onLoad);
+      tween.scrollTrigger && tween.scrollTrigger.kill();
+      tween.kill();
+    };
   }, [scrollContainerRef, animationDuration, ease, scrollStart, scrollEnd, stagger]);
 
   return (

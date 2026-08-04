@@ -47,6 +47,11 @@ export function SettingsPage({ data }: { data: DashboardSummary }) {
           ? "As an admin on this tenant, you can set the budget figure. Provisioning new tenants is an operator action (the create-tenant CLI subcommand), not a self-service signup flow."
           : "As a viewer on this tenant, you can see everything but can't change the budget figure — ask an admin on your tenant."}
       </p>
+
+      <div className="max-w-lg rounded-2xl border border-dashed border-[var(--border)] p-3">
+        <div className="text-xs font-medium text-[var(--ink-secondary)]">Plan status</div>
+        <div className="mt-1 text-xs text-[var(--ink-muted)]">Coming soon — no billing/subscription system exists yet.</div>
+      </div>
     </motion.div>
   );
 }

@@ -40,7 +40,7 @@ chidrixx/
 │       ├── kharcha/     the eBPF agent binary          — 12 test files, 26 test functions
 │       └── loadgen/     load-test traffic generator (no tests)
 ├── controlplane/        module `chidrixx-controlplane` — 5,122 lines Go (excl. tests), 35 files
-│   ├── web/             React/Vite/TS dashboard SPA    — 5,488 lines TS/TSX, 37 .tsx + 10 .ts files
+│   ├── web/             React/Vite/TS dashboard SPA    — 5,836 lines TS/TSX, 39 .tsx + 10 .ts files
 │   └── e2e/             committed Playwright E2E suite — 10 .ts files (§3.10)
 ├── bpf/                 flow_cgroup.c + compiled flow_cgroup.o (committed binary, go:embed'd)
 ├── pricebook/            aws.yaml, gcp.yaml — real cited price data
@@ -49,7 +49,7 @@ chidrixx/
 └── .github/workflows/   ci.yml — 7 jobs, both modules (§6)
 ```
 
-Total: **~14,400 lines** of hand-written Go + TypeScript across both
+Total: **~14,700 lines** of hand-written Go + TypeScript across both
 modules and the frontend (not counting vendored react-bits `.jsx`/`.css`
 files, which are third-party, installed via the real `shadcn` CLI; not
 counting the separate 10-file E2E suite). All four counts above were
@@ -1090,23 +1090,27 @@ new real edge, not a stale count left unfixed.
 
 ## 4. Frontend — component inventory
 
-37 `.tsx` files + 10 `.ts` files (excluding `.d.ts`), 5,488 lines in
+39 `.tsx` files + 10 `.ts` files (excluding `.d.ts`), 5,836 lines in
 `src/` — re-counted directly against the tree, not carried forward from
 an earlier session's number. Separately, `e2e/` holds 10 more `.ts`
 files (the committed Playwright suite, §3.10 — a distinct concern from
 the app's own source, not counted here). React 18 + Vite 5 +
-TypeScript + Tailwind + Recharts + Framer Motion + GSAP. No component
-library — every visual element (donut chart, trend chart, cost graph,
-force layout) is hand-built, matching the project's stated preference
-for owning its own rendering rather than pulling in a chart/graph
-dependency. Every sidebar page beyond Overview is its own code-split
-chunk via `React.lazy()`/`Suspense` (§8's now-closed bundle-size item).
+TypeScript + Tailwind + Recharts + Framer Motion + GSAP + `cmdk` (new,
+§4.5). No component library — every visual element (donut chart, trend
+chart, cost graph, force layout, command palette) is hand-built or
+directly styled, matching the project's stated preference for owning
+its own rendering rather than pulling in a pre-styled UI kit. Every
+sidebar page beyond Overview is its own code-split chunk via
+`React.lazy()`/`Suspense` (§8's now-closed bundle-size item).
 
-### 4.1 Pages (sidebar-routed, 16 total, verified against `Sidebar.tsx`)
+### 4.1 Pages (rail-routed, 16 total, verified against `CommandRail.tsx`)
 
 Overview (default), **Assistant**, Insights, Explorer, Workloads, Cost
 Graph, Teams, Costs & Usage, Budgets, Savings Advisor, Forecasting,
-Anomalies, History, Reports, Automations, Settings.
+Anomalies, History, Reports, Automations, Settings — same 16 real
+destinations as before §4.5's shell redesign, now grouped into four
+constellations (Observe/Understand/Act/Organize) instead of one flat
+list; no page's own route id or internal content changed.
 
 ### 4.2 Components added across this document's sessions (cumulative, file-verified)
 
@@ -1123,37 +1127,190 @@ Anomalies, History, Reports, Automations, Settings.
 | `supabaseClient.ts` | Real `createClient(url, publishableKey)`, fails loudly if env vars are missing rather than silently degrading |
 | `session.ts` | `SessionContext`/`Session` type shared across the app |
 | `PlacementSimulatorCard.tsx` | The real offline placement-optimization UI (§3.17) — zone-count selector, calls `GET /api/v1/placement/preview`, rendered on Cost Graph |
-| `AnomalyAlertBell.tsx` **(new)** | The real proactive-detection UI (§3.21) — a Topbar bell (every page, not just Anomalies) polling `GET /api/v1/anomalies/alerts` every 15s, unread-count badge, dismiss via `POST .../acknowledge` |
+| `AnomalyAlertBell.tsx` | The real proactive-detection UI (§3.21) — a HUD bell (every page, not just Anomalies) polling `GET /api/v1/anomalies/alerts` every 15s, unread-count badge, dismiss via `POST .../acknowledge`; restyled in §4.5 (flat ink badge + an expanding-ring pulse instead of a colored ping-glow) |
+| `CommandRail.tsx` **(new)** | Replaces the old flat `Sidebar.tsx` (§4.5) — the same 16 real pages, grouped into four constellations, default-expanded (240px, icon+label) with a real collapse toggle down to a 72px icon-only rail |
+| `TopHUD.tsx` **(new)** | Replaces the old `Topbar.tsx` (§4.5) — org mark, current-section breadcrumb, the `⌘K` search pill, the live-sync pulse, date/filter/download icon buttons, `AnomalyAlertBell`, and an account menu (role + real log out) |
+| `CommandPalette.tsx` **(new)** | A real `⌘K`/`Ctrl K` command palette (§4.5, `cmdk`-based) — fuzzy-jump to any of the 16 real sections |
+| `ChidrixxMark.tsx` **(new)** | The real brand mark (§4.6) — a 3-facet shaded isometric cube, zero blur/glow, reused at every size from the 24px Top HUD mark to the 96px landing-page hero |
 
 ### 4.3 Frontend build output (measured, current — rebuilt as part of this update)
 
 ```
-dist/assets/index-*.js               1,123.39 kB  (329.00 kB gzip)
-dist/assets/index-*.css                 20.47 kB  (5.52 kB gzip)
-dist/assets/AutomationsPage-*.js          9.02 kB  (2.53 kB gzip)
-dist/assets/CostGraphPage-*.js            9.16 kB  (3.28 kB gzip)
-dist/assets/FeaturePages-*.js             8.58 kB  (3.10 kB gzip)
-dist/assets/AssistantPage-*.js            5.94 kB  (2.25 kB gzip)
-dist/assets/TeamsPage-*.js                7.83 kB  (2.10 kB gzip)
+dist/assets/index-*.js               1,169.82 kB  (345.56 kB gzip)
+dist/assets/index-*.css                 22.6 kB   (5.7 kB gzip)
+dist/assets/AutomationsPage-*.js          9.02 kB  (2.51 kB gzip)
+dist/assets/CostGraphPage-*.js            9.16 kB  (3.29 kB gzip)
+dist/assets/FeaturePages-*.js             8.58 kB  (3.08 kB gzip)
+dist/assets/AssistantPage-*.js            5.94 kB  (2.24 kB gzip)
+dist/assets/TeamsPage-*.js                7.83 kB  (2.09 kB gzip)
 + 6 more page chunks, 1.5-4kB each
 ```
 
-Code-split (§8, closed): only Overview + Sidebar ship in the main
-bundle's *page* code — the main chunk is still large because it's
-dominated by vendor libraries (React, Framer Motion, GSAP, Recharts,
-Supabase client), not app page code; vendor-chunk splitting would be the
-next lever if this needs to go further (not attempted, wasn't asked).
+Code-split (§8, closed): only Overview + the new shell (`CommandRail`/
+`TopHUD`/`CommandPalette`) ship in the main bundle's *page* code — the
+main chunk grew slightly (`cmdk`, §4.5) but is still dominated by vendor
+libraries (React, Framer Motion, GSAP, Recharts, Supabase client), not
+app page code; vendor-chunk splitting would be the next lever if this
+needs to go further (not attempted, wasn't asked).
 
 ### 4.4 Frontend dependencies (`package.json`, exact)
 
-Runtime: `@fontsource-variable/geist`, `@supabase/supabase-js`,
-`framer-motion`, `gsap`, `motion`, `react` + `react-dom` (18.x),
-`recharts`. Dev: `@playwright/test` (§3.10's E2E suite) plus the
-standard Vite+React+TS+Tailwind toolchain. Vendored (not in
-`package.json`, committed as source): `DecryptedText.jsx`,
+Runtime: `@fontsource-variable/geist`, `@supabase/supabase-js`, `cmdk`
+**(new, §4.5)**, `framer-motion`, `gsap`, `motion`, `react` +
+`react-dom` (18.x), `recharts`. Dev: `@playwright/test` (§3.10's E2E
+suite) plus the standard Vite+React+TS+Tailwind toolchain. Vendored (not
+in `package.json`, committed as source): `DecryptedText.jsx`,
 `RotatingText.jsx` + `.css`, `VariableProximity.jsx` + `.css` —
 react-bits components pulled in via the real `shadcn` CLI, not
 hand-copied.
+
+### 4.5 Real UI/UX shell redesign — Phase 1 of `web/DESIGN_VISION.md`
+
+A full creative brief (`controlplane/web/DESIGN_VISION.md`) was written
+first, then deliberately scoped down before building: the brief's
+"Mission Control" north star was kept, but its original dark, glowing
+night-control-room visual direction was replaced, on direct instruction,
+with a light, near-monochrome, zero-glow direction — reframed in the
+brief itself around *2001: A Space Odyssey*'s white spacecraft interiors
+and "the HAL principle": chrome (backgrounds, buttons, borders) is
+monochrome; color is reserved entirely for real computed data, never
+decoration. This section covers what was actually shipped now (Phase 1
+of that brief's 4-phase roadmap): a real shell redesign, not the full
+living-topology canvas (Phase 3), which remains future work.
+
+**Real color-token change, chrome only, data colors deliberately
+untouched**: `index.css`'s `--page`/`--surface`/`--ink`/`--border`/
+`--card-shadow`/`--accent` moved to a warm off-white/near-black system
+(`--accent` is now literally `--ink` — a primary button is ink-on-paper,
+not a separate brand color). A first attempt also desaturated the 8
+categorical data colors (`--series-*`/`--status-*`) to match — this was
+**caught and reverted** by actually running the dataviz skill's own
+`validate_palette.js` against the muted values rather than eyeballing
+them: the desaturated set failed the chroma-floor, CVD-separation, and
+normal-vision-floor checks. Those 8 colors are the project's own
+previously-validated categorical palette (`palette.ts`, unchanged since
+originally adopted) and represent real data (path class, confidence,
+status) — the "HAL principle" itself says color is reserved for exactly
+that case, so muting them further would have traded real accessibility
+for a look. Re-verified: the reverted values pass validation; only
+chrome changed.
+
+**Shell rebuilt, same 16 real pages/routes underneath**: `Sidebar.tsx`
+and `Topbar.tsx` are deleted, replaced by `CommandRail.tsx` (grouped,
+collapsible 72↔240px rail) and `TopHUD.tsx` (org mark, section
+breadcrumb, `⌘K` search, live pulse, date/filter/download, the
+restyled `AnomalyAlertBell`, an account menu). A new `CommandPalette.tsx`
+(`cmdk`) adds real fuzzy-jump navigation across all 16 sections — a
+genuine usability addition, not just visual. Every existing page's own
+internal layout and logic is untouched; only the shell around them
+changed, per the brief's own Phase-1 scoping.
+
+**Glow removed everywhere it was found, not just where it was planned**:
+beyond the brief's own scope, two pre-existing decorative blurred-glow
+background orbs (`App.tsx`, `LandingPage.tsx`) were found and removed
+during this pass — replaced with a plain, motion-only dot-grid reference
+plane on the landing page (drift, not light). The anomaly bell's colored
+ping-glow badge became a flat ink badge with an expanding-ring pulse
+(motion carries "live," not light) — the same real backend data, just no
+longer signaled with a glow.
+
+**Verified real, not just visually**: full TypeScript build clean, full
+Playwright suite green (27/27) after real, honest fixes — not
+disabling tests, but updating them to match real UI changes: 5 tests hit
+a real new ambiguity (the HUD's breadcrumb duplicates rail text) fixed
+with `.first()`; 2 tests (log out, viewer-role visibility) now correctly
+open the new account menu first, since those real controls actually
+moved there. Screenshotted directly (Overview, Automations, command
+palette, bell dropdown, collapsed rail, landing page) against a real
+locally-run instance with real ingested data before calling this done,
+consistent with this project's UI-verification discipline throughout.
+
+Explicitly deferred to a later phase (per the brief's own roadmap, §10
+of `DESIGN_VISION.md`): the living topology canvas itself (Phase 3),
+page renaming to the Mission Control vocabulary ("The Grid," "Ground
+Control" as a full overlay merging the Assistant page), and the
+motion/sound polish pass (Phase 2). This pass is the shell and color
+system only.
+
+---
+
+### 4.6 Real branded landing page + a real GSAP scroll-animation bug fix
+
+Direct follow-up feedback on §4.5: the new landing page was "too simple"
+(wanted a real marketing page — feature sections, a real demo slot —
+like a proper product site) and the visual language needed one more
+correction: no separate accent color anywhere, grey used as a real,
+visible shade (not just a whisper of off-white), and headline text with
+a genuine grey-gradient 3D/embossed look. A brand mark (a 3D chrome "C")
+was shared as a style reference first; since pasted chat images aren't
+saved to a file this build can reference, it was initially recreated in
+CSS/SVG (a real isometric cube built from three flat shaded facets).
+Once a real file path for the actual asset was provided
+(`~/Downloads/...png`), it replaced the CSS version outright, per direct
+instruction — the real asset, not a recreation of it.
+
+**`ChidrixxMark.tsx`**: renders the real provided logo image
+(`public/chidrixx-mark.png`) inside a sized bounding box via
+`object-contain`, so every call site controls its own size without
+distorting the source art's real aspect ratio. The source PNG (1536×1024,
+2.2MB, real alpha transparency confirmed directly by inspecting pixel
+alpha values, not assumed) was downscaled to 600px wide (~90KB) — same
+visual result at every real display size used, a fraction of the
+original transfer weight. Used large (h-24/h-32) on the landing page
+hero, small (24–28px) in the Top HUD (§4.5) and the landing nav/footer —
+the same real mark everywhere, not a different logo pre- and
+post-sign-in.
+
+**A new `.text-3d-grey` CSS utility**: a grey-gradient fill
+(`background-clip: text`) plus a stack of crisp, zero-blur, same-direction
+offset text-shadows underneath it, producing a real embossed/extruded
+look built entirely from flat shade layers — applied to the landing
+page's "chidrixx" wordmark and the "How it works" step numerals.
+
+**`LandingPage.tsx` rebuilt as a real marketing page**: a sticky nav
+(mark, anchor links, log in / get started), a hero with the 3D mark +
+gradient heading + a real screenshot of the live dashboard (captured
+directly from the running app, not a mockup) framed in a tilted
+browser-chrome card, a 6-card features grid covering every real shipped
+capability (path classification, fix engine, multi-cluster, the grounded
+AI assistant, proactive anomaly watch, the placement simulator — nothing
+listed that isn't actually running), a 3-step "how it works," a real
+`<video>`-based demo section (points at `/demo.mp4`, falls back to an
+honest "Demo video coming soon" state via `onError` when the file isn't
+there yet — never fabricates a video that doesn't exist), and a footer
+with a real GitHub link. A new `--surface-grey` token gives alternating
+sections a real, visible grey band instead of a near-invisible off-white.
+
+**A real bug found and fixed along the way, not just a cosmetic
+pass**: screenshotting the dashboard for the hero image surfaced
+several dashboard section titles (`SectionTitle`/`ScrollFloat.jsx`, a
+vendored GSAP `ScrollTrigger`-scrubbed character reveal) rendering
+permanently garbled — stuck mid-reveal, not a transient animation frame.
+Root cause, confirmed directly (forced a real `scrollTop` change via
+`page.evaluate` and watched it instantly resolve correctly): a scrubbed
+`ScrollTrigger` computes its start/end pixel positions once, and real
+async layout settling shortly after mount (a chart library measuring
+itself, fonts swapping in) leaves that cached position stale, freezing
+the reveal at whatever fractional progress the stale math produces,
+until a real scroll event forces GSAP to recompute. §4.5's shell
+restructuring (moving the scroll container, adding a fixed-height Top
+HUD sibling above it) changed layout timing enough to make this
+reliably reproducible, though the underlying bug was already latent in
+the vendored component. Fixed in `ScrollFloat.jsx`: an `rAF` pass, three
+staged `setTimeout` passes (200/600/1200ms), a `window.load` listener,
+and a real `ResizeObserver` on `document.body` (open for a bounded 2s
+after mount) all call `ScrollTrigger.refresh()` — reacting to whatever
+actually resettles layout instead of guessing one fixed delay. Also
+added proper teardown (the original had no cleanup at all — a real leak,
+fixed alongside). Verified, not assumed: repeated real screenshots at
+multiple wait times (300ms–4.5s) against both a local instance and the
+live cluster's real production data, before and after, confirmed the fix
+holds rather than just happening to look right once.
+
+Full TypeScript build clean, full Go suite green (unaffected — this pass
+touched only the frontend), full Playwright suite green (27/27), and
+redeployed to the live cluster with a direct visual re-verification —
+the same discipline as every other feature in this document.
 
 ---
 

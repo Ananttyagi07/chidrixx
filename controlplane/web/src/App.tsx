@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion, useScroll, useTransform } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { fetchDashboardSummary } from "./api";
 import { supabase } from "./supabaseClient";
 import { apiFetch } from "./apiFetch";
@@ -12,8 +12,8 @@ import { TopFixesTable } from "./components/TopFixesTable";
 import { BudgetCard } from "./components/BudgetCard";
 import { AnomalyCard } from "./components/AnomalyCard";
 import { TrendProjectionCard } from "./components/TrendProjectionCard";
-import { Sidebar } from "./components/Sidebar";
-import { Topbar } from "./components/Topbar";
+import { CommandRail } from "./components/CommandRail";
+import { TopHUD } from "./components/TopHUD";
 import { LandingPage } from "./components/LandingPage";
 import { SectionTitle } from "./components/SectionTitle";
 import { AnimatedNumber, AnimatedRange } from "./components/AnimatedNumber";
@@ -115,9 +115,6 @@ function Dashboard({ session, onLogout }: { session: Session; onLogout: () => vo
   const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState("overview");
   const scrollRef = useRef<HTMLDivElement>(null);
-  const { scrollYProgress } = useScroll({ container: scrollRef });
-  const orb1Y = useTransform(scrollYProgress, [0, 1], [0, 220]);
-  const orb2Y = useTransform(scrollYProgress, [0, 1], [0, -160]);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,19 +188,11 @@ function Dashboard({ session, onLogout }: { session: Session; onLogout: () => vo
   return (
     <SessionContext.Provider value={session}>
     <div className="relative flex h-screen overflow-hidden bg-[var(--page)]">
-      <motion.div
-        style={{ y: orb1Y }}
-        className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-[var(--accent)] opacity-[0.06] blur-3xl"
-      />
-      <motion.div
-        style={{ y: orb2Y }}
-        className="pointer-events-none absolute right-0 top-1/3 h-72 w-72 rounded-full bg-[var(--series-blue)] opacity-[0.05] blur-3xl"
-      />
+      <CommandRail active={active} onSelect={setActive} />
 
-      <Sidebar active={active} onSelect={setActive} session={session} onLogout={onLogout} />
-
-      <main ref={scrollRef} className="relative z-10 flex-1 overflow-y-auto p-6">
-        <Topbar data={data} />
+      <main className="relative z-10 flex flex-1 flex-col overflow-hidden">
+        <TopHUD active={active} session={session} data={data} onLogout={onLogout} onNavigate={setActive} />
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 pb-6 pt-4">
 
         <AnimatePresence mode="wait">
           {active === "costs" ? (
@@ -354,6 +343,7 @@ function Dashboard({ session, onLogout }: { session: Session; onLogout: () => vo
             </motion.div>
           )}
         </AnimatePresence>
+        </div>
       </main>
     </div>
     </SessionContext.Provider>

@@ -14,7 +14,7 @@ async function loginAsAdmin(context: import("@playwright/test").BrowserContext) 
 test("a valid session cookie reaches the real dashboard, not the landing page", async ({ page, context }) => {
   await loginAsAdmin(context);
   await page.goto("/");
-  await expect(page.getByText("Overview")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Overview").first()).toBeVisible({ timeout: 10_000 });
 });
 
 test("no session shows the real landing page", async ({ page }) => {
@@ -44,7 +44,7 @@ test("a self-hosted admin can actually sign in through the real visible username
   await page.getByLabel("Password").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
 
-  await expect(page.getByText("Overview")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Overview").first()).toBeVisible({ timeout: 10_000 });
 });
 
 test("the real username-login form rejects a wrong password with a visible error, not a silent failure", async ({ page }) => {
@@ -62,8 +62,9 @@ test("the real username-login form rejects a wrong password with a visible error
 test("logout clears the real session and returns to landing", async ({ page, context }) => {
   await loginAsAdmin(context);
   await page.goto("/");
-  await expect(page.getByText("Overview")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Overview").first()).toBeVisible({ timeout: 10_000 });
 
+  await page.getByTitle("Account menu").click();
   await page.getByText("Log out").click();
   await expect(page.getByText("View live dashboard")).toBeVisible({ timeout: 5_000 });
 

@@ -10,7 +10,7 @@ test.beforeEach(async ({ context }) => {
 
 test("Overview shows the real ingested finding, not fabricated data", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("Overview")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Overview").first()).toBeVisible({ timeout: 10_000 });
   // "Overview" (the sidebar link) renders before the async dashboard-summary
   // fetch resolves -- wait for real ingested content, not just the shell,
   // before snapshotting the page.

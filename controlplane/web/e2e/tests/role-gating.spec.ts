@@ -10,7 +10,8 @@ test.beforeEach(async ({ context }) => {
 
 test("a viewer sees the real role in the sidebar and no budget-edit control", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("Overview")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Overview").first()).toBeVisible({ timeout: 10_000 });
+  await page.getByTitle("Account menu").click();
   await expect(page.getByText("viewer", { exact: true })).toBeVisible();
 
   await page.getByText("Budgets", { exact: true }).click();
