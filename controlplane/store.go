@@ -300,6 +300,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_recommendation_outcomes_identity
 		return nil, fmt.Errorf("migrate tenant_id column on flow_aggregate: %w", err)
 	}
 
+	// A covering index on (tenant_id, cluster_id, dst_workload_or_endpoint)
+	// was tried here to speed up HistoricalFlowsToDestination
+	// (traffic_replay.go) and deliberately REVERTED after measuring it on
+	// the real live system, not in theory. It did make the lookup itself
+	// ~4x faster (4.24s -> 1.0s per query, EXPLAIN QUERY PLAN confirmed it
+	// was being used, measured against a real 4.1M-row copy of the
+	// production database) -- but indexing a TEXT column on a table under
+	// continuous real agent ingest cost far more than it saved: real
+	// live measurement after deploying it showed /api/v1/findings, a read
+	// path this feature never touches, regressing from 3.9s to 36-45s with
+	// the pod pegged above a full CPU core and a 162MB WAL that stopped
+	// checkpointing. The write amplification on every ingest overwhelmed
+	// SQLite's single writer and queued the readers behind it.
+	//
+	// Not needed anyway: SimulateTrafficReplay only runs this lookup for
+	// fixes that already cleared every other policy bar (remediation.go),
+	// so it's a rare query, and paying a real ~4s once for a genuine
+	// safety check beats permanently taxing every real ingest.
+	if _, err := db.Exec(`DROP INDEX IF EXISTS idx_flow_aggregate_tenant_cluster_dst`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("drop reverted flow_aggregate destination index: %w", err)
+	}
+
 	// supabase_user_id links a users row to a real Supabase Auth identity
 	// once Supabase-backed signup shipped -- nullable, since CLI-provisioned
 	// (create-user) rows have no Supabase account at all. SQLite's
@@ -525,6 +548,45 @@ func (s *Store) LatestFindings(tenantID int64, limit int) ([]FindingRow, error) 
 		r.SavingsLowINR = savingsLow.Float64
 		r.SavingsHighINR = savingsHigh.Float64
 		out = append(out, r)
+	}
+
+	return out, rows.Err()
+}
+
+// HistoricalFlowsToDestination returns the real summed cost per source
+// workload for every real flow this tenant's cluster has ever recorded to
+// one specific destination — the data traffic_replay.go's
+// EvaluateTrafficReplay needs to answer "would this generated
+// NetworkPolicy also block any other real workload's traffic to the same
+// destination?" Scans flow_aggregate UNION ALL flow_aggregate_daily (same
+// pattern as WorkloadCostGrowth, workloadgrowth.go) so compaction folding
+// old raw rows into daily rollups can't silently make old collateral
+// traffic invisible to this safety check.
+func (s *Store) HistoricalFlowsToDestination(tenantID int64, clusterID, destination string) ([]HistoricalFlowCost, error) {
+	rows, err := s.db.Query(`
+		SELECT src_workload, SUM(cost) FROM (
+			SELECT src_workload, cost_high_inr AS cost
+			FROM flow_aggregate
+			WHERE tenant_id = ? AND cluster_id = ? AND dst_workload_or_endpoint = ?
+			UNION ALL
+			SELECT src_workload, cost_high_inr AS cost
+			FROM flow_aggregate_daily
+			WHERE tenant_id = ? AND cluster_id = ? AND dst_workload_or_endpoint = ?
+		) combined
+		GROUP BY src_workload
+	`, tenantID, clusterID, destination, tenantID, clusterID, destination)
+	if err != nil {
+		return nil, fmt.Errorf("query historical flows to destination: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]HistoricalFlowCost, 0)
+	for rows.Next() {
+		var hf HistoricalFlowCost
+		if err := rows.Scan(&hf.SrcWorkload, &hf.CostHighINR); err != nil {
+			return nil, fmt.Errorf("scan historical flow cost: %w", err)
+		}
+		out = append(out, hf)
 	}
 
 	return out, rows.Err()

@@ -134,6 +134,21 @@ export interface WorkloadGrowth {
   related_events?: DeployEvent[];
 }
 
+// The real traffic-replay safety check (controlplane/traffic_replay.go):
+// the generated NetworkPolicy uses podSelector: {}, so it applies to every
+// pod in the namespace -- this replays it against the tenant's own real
+// historical traffic to find any OTHER real workload that also depends on
+// the destination being blocked.
+export interface TrafficReplayResult {
+  safe: boolean;
+  safety_score: number;
+  blocked_destinations: string[];
+  intended_cost_inr: number;
+  collateral_cost_inr: number;
+  affected_workloads?: string[];
+  note?: string;
+}
+
 export interface RemediationDecision {
   cluster_id: string;
   source: string;
@@ -146,6 +161,7 @@ export interface RemediationDecision {
   savings_high_inr: number;
   would_auto_apply: boolean;
   reasons: string[];
+  traffic_replay?: TrafficReplayResult;
 }
 
 export interface RemediationPreviewResponse {

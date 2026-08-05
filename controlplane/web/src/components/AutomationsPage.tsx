@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import type { DashboardSummary, OutcomeDatasetStats, RemediationDecision } from "../types";
+import type {
+  DashboardSummary,
+  OutcomeDatasetStats,
+  RemediationDecision,
+  TrafficReplayResult,
+} from "../types";
 import { PATH_CLASS_LABEL } from "../palette";
 import { formatINR } from "../format";
 import { IconDownload } from "../icons";
@@ -155,9 +160,15 @@ function RemediationPreview() {
         <h3 className="text-sm font-semibold">If auto-remediation were enabled</h3>
         <p className="mt-1 max-w-2xl text-xs text-[var(--ink-muted)]">
           A real, deterministic policy (real generated manifest + high confidence + positive predicted
-          savings) evaluated against your current real flagged fixes. Nothing here is applied — chidrixx
-          has no write access to any cluster. This is the evidence-gathering step before that would ever
-          become a real, explicitly opt-in feature.
+          savings) evaluated against your current real flagged fixes. Each generated manifest is then
+          replayed against your own real recorded traffic — because it uses{" "}
+          <code className="rounded bg-[var(--surface-sunken)] px-1 py-0.5 font-mono">
+            {"podSelector: {}"}
+          </code>{" "}
+          it applies to every pod in that namespace, so anything else that genuinely depends on the
+          blocked destination disqualifies it. Nothing here is applied — chidrixx has no write access to
+          any cluster. This is the evidence-gathering step before that would ever become a real,
+          explicitly opt-in feature.
         </p>
       </div>
 
@@ -216,6 +227,53 @@ function DecisionRow({ d }: { d: RemediationDecision }) {
         <span className="font-mono tabular-nums text-[var(--ink)]">{formatINR(d.savings_high_inr)}</span>
       </div>
       <div className="mt-1 text-[var(--ink-muted)]">{d.reasons.join("; ")}</div>
+      {d.traffic_replay && <TrafficReplayDetail replay={d.traffic_replay} />}
+    </div>
+  );
+}
+
+// Renders the real replayed-against-history evidence behind a decision --
+// never a bare verdict. When the check found real collateral traffic, the
+// specific real workloads and their real cost are named, since "this
+// would also break something" is only actionable if you can see what.
+function TrafficReplayDetail({ replay }: { replay: TrafficReplayResult }) {
+  const affected = replay.affected_workloads ?? [];
+
+  return (
+    <div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[0.65rem] font-medium uppercase tracking-wide text-[var(--ink-muted)]">
+          Traffic replay
+        </span>
+        <span
+          className={`rounded px-1.5 py-0.5 text-[0.65rem] font-medium ${
+            replay.safe
+              ? "bg-[var(--status-good)]/10 text-[var(--status-good)]"
+              : "bg-[var(--status-warning)]/15 text-[var(--ink-secondary)]"
+          }`}
+        >
+          {replay.safe ? "No collateral traffic found" : "Collateral traffic found"}
+        </span>
+        {replay.blocked_destinations.length > 0 && (
+          <span className="font-mono text-[0.65rem] text-[var(--ink-muted)]">
+            blocks {replay.blocked_destinations.join(", ")}
+          </span>
+        )}
+      </div>
+
+      {affected.length > 0 && (
+        <div className="mt-1.5 text-[var(--ink-secondary)]">
+          <span className="text-[var(--ink-muted)]">
+            Would also block {affected.length} other workload{affected.length === 1 ? "" : "s"} in this
+            namespace (
+          </span>
+          <span className="font-mono tabular-nums">{formatINR(replay.collateral_cost_inr)}</span>
+          <span className="text-[var(--ink-muted)]"> of real traffic): </span>
+          <span className="font-mono">{affected.join(", ")}</span>
+        </div>
+      )}
+
+      {replay.note && <div className="mt-1.5 text-[var(--ink-muted)]">{replay.note}</div>}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 # chidrixx — Project & Technical Status (Universal Reference)
 
-_Last updated: 2026-08-03 (a real dry-run closed-loop remediation preview and a real offline placement simulator both shipped, plus a full re-verification pass earlier the same day: fresh line/file/test counts throughout, corrected a stale agent/ line count, fixed a real internal contradiction on bundle code-splitting, refreshed live-cluster stats against a freshly pulled+integrity-checked database copy, and corrected a stale "zero rows" claim about the outcome dataset)_
+_Last updated: 2026-08-05 (a real deterministic traffic-replay safety check for generated NetworkPolicies shipped — §3.22 — including a real live performance regression that was caught by measurement and reverted rather than shipped, a real Helm probe-headroom fix, a real JSX rendering bug, and a real committed-E2E-fixture correction; all line/file/test counts below re-measured against the current tree)_
 
 This is the single, complete picture of chidrixx: what's real and
 verified, what's explicitly not built (and why), what's actually left to
@@ -39,9 +39,9 @@ chidrixx/
 │   └── cmd/
 │       ├── kharcha/     the eBPF agent binary          — 12 test files, 26 test functions
 │       └── loadgen/     load-test traffic generator (no tests)
-├── controlplane/        module `chidrixx-controlplane` — 5,122 lines Go (excl. tests), 35 files
-│   ├── web/             React/Vite/TS dashboard SPA    — 5,836 lines TS/TSX, 39 .tsx + 10 .ts files
-│   └── e2e/             committed Playwright E2E suite — 10 .ts files (§3.10)
+├── controlplane/        module `chidrixx-controlplane` — 6,071 lines Go (excl. tests), 40 files
+│   ├── web/             React/Vite/TS dashboard SPA    — 5,909 lines TS/TSX, 39 .tsx + 10 .ts files
+│   └── e2e/             committed Playwright E2E suite — 11 .ts files (§3.10)
 ├── bpf/                 flow_cgroup.c + compiled flow_cgroup.o (committed binary, go:embed'd)
 ├── pricebook/            aws.yaml, gcp.yaml — real cited price data
 ├── deploy/helm/          kharcha/ + controlplane/ charts, 18 template/value files total
@@ -49,10 +49,10 @@ chidrixx/
 └── .github/workflows/   ci.yml — 7 jobs, both modules (§6)
 ```
 
-Total: **~14,700 lines** of hand-written Go + TypeScript across both
+Total: **~15,100 lines** of hand-written Go + TypeScript across both
 modules and the frontend (not counting vendored react-bits `.jsx`/`.css`
 files, which are third-party, installed via the real `shadcn` CLI; not
-counting the separate 10-file E2E suite). All four counts above were
+counting the separate 11-file E2E suite). All four counts above were
 re-measured directly against the current tree while writing this
 update, not carried forward from an earlier pass.
 
@@ -238,7 +238,7 @@ CAP_BPF; those run in CI on GitHub-hosted VMs).
 | `/api/v1/anomalies/alerts` **(new)** | GET | `requireSession` | `handleAnomalyAlerts` — real, unacknowledged, proactively-detected anomalies (§3.21) |
 | `/api/v1/anomalies/alerts/acknowledge` **(new)** | POST | `requireSession` | `handleAcknowledgeAnomalyAlert` — dismiss one real alert |
 | `/api/v1/forecast` | GET | `requireSession` | `handleForecast` — `?cluster_id=X`, real backtested model selection (§3.14) |
-| `/api/v1/remediation/preview` | GET | `requireSession` | `handleRemediationPreview` — real dry-run auto-remediation policy evaluation, never mutates anything (§3.16) |
+| `/api/v1/remediation/preview` | GET | `requireSession` | `handleRemediationPreview` — real dry-run auto-remediation policy evaluation, never mutates anything (§3.16); each qualifying fix's generated manifest is additionally replayed against real historical traffic for collateral impact (§3.22) |
 | `/api/v1/placement/preview` | GET | `requireSession` | `handlePlacementPreview` — real offline graph-partitioning simulation, `?groups=N` (§3.17) |
 | `/api/v1/auth/me` | GET | `requireSession` | `handleMe` |
 | `/api/v1/auth/login` | POST | none (that's the point) | `handleLogin` |
@@ -308,8 +308,9 @@ which detects the old schema via `sqlite_master.sql` and does a real
 | `forecast.go` **(new)** | `holtFit`/`holtForecastAhead` (damped-trend generalized Holt), `fitBestHolt`, `backtestMAE` (rolling-origin validation), `ComputeDeepForecast` (the model-selection entry point). |
 | `forecast_api.go` | `handleForecast` — `GET /api/v1/forecast?cluster_id=X`. |
 | `summary.go` | `computeSummary`/`computeSpendByClass`/`computeSpendByCloud` — pure Go aggregation over already-fetched findings, replacing 3 redundant SQL scans (§3.15). |
-| `remediation.go` **(new)** | `RemediationPolicy`, `EvaluateRemediation` — real dry-run closed-loop remediation policy engine (§3.16). |
+| `remediation.go` **(new)** | `RemediationPolicy`, `EvaluateRemediation` — real dry-run closed-loop remediation policy engine (§3.16); plus `SimulateTrafficReplay`, which runs §3.22's real safety check over qualifying decisions only. |
 | `remediation_api.go` | `handleRemediationPreview` — `GET /api/v1/remediation/preview`. |
+| `traffic_replay.go` **(new)** | `parseGeneratedNetworkPolicy`, `EvaluateTrafficReplay` — real deterministic replay of a generated NetworkPolicy against this tenant's own real historical traffic, to find collateral impact before ever calling a fix safe to auto-apply (§3.22). |
 | `placement.go` **(new)** | `buildPlacementGraph`, `OptimizePlacement` — real Kernighan-Lin graph partitioning with multi-restart (§3.17). |
 | `placement_api.go` **(new)** | `handlePlacementPreview` — `GET /api/v1/placement/preview?groups=N`. |
 | `compaction.go` **(new)** | `CompactFindingsOlderThan` (real day-bucketed rollup + atomic delete), `StartCompactionLoop` (background ticker) — the real retention/compaction fix, §3.18. |
@@ -322,13 +323,17 @@ which detects the old schema via `sqlite_master.sql` and does a real
 ### 3.5 Control plane dependencies (`go.mod`, exact versions)
 
 Direct: `golang.org/x/crypto v0.54.0` (bcrypt), `modernc.org/sqlite
-v1.54.0` (pure-Go, no cgo). 8 indirect deps, all `modernc.org/sqlite`'s
-own transitive requirements (libc, mathutil, memory, bigfft, etc.) plus
+v1.54.0` (pure-Go, no cgo), and — new with §3.22 — `gopkg.in/yaml.v3
+v3.0.1`, for really parsing the generated NetworkPolicy manifests rather
+than hand-rolled string matching (the same library the agent module
+already uses for its price books, so it's not a new library to the repo,
+only to this module). 8 indirect deps, all `modernc.org/sqlite`'s own
+transitive requirements (libc, mathutil, memory, bigfft, etc.) plus
 `google/uuid` and `go-isatty`. The Groq client (§3.12) adds zero new
 dependencies — it's a plain `net/http` client against Groq's
 OpenAI-compatible REST API, not an SDK.
 
-### 3.6 Control plane test inventory — 189 test functions across 30 files
+### 3.6 Control plane test inventory — 209 test functions across 31 files
 
 | File | Approx. tests | Covers |
 |---|---|---|
@@ -354,6 +359,7 @@ OpenAI-compatible REST API, not an SDK.
 | `compaction_test.go` | 8 | Real sum/`sample_count` correctness folding multiple raw rows into one rollup, recent rows left untouched, idempotent re-run over already-compacted data, separate real calendar days never merged, tenant isolation, the `WorkloadCostGrowth`-survives-compaction integration test, a real no-op guard when nothing is old enough yet |
 | `aieval_test.go` + `aieval_api_test.go` **(new)** | 6 | Empty-with-no-events state, real per-feature aggregation (success rate, avg latency, tool success rate, token sums) against known inputs, tenant isolation at both the store and API layer, wrong-method rejection |
 | `anomaly_watch_test.go` + `anomaly_watch_api_test.go` **(new)** | 14 | A real new alert recorded and idempotent across repeated ticks with no new data, a genuinely new alert after a fresh anomalous snapshot, no alert when growth is below threshold, acknowledge removes it from the unacknowledged list (idempotently), 404 for an unknown alert ID, tenant isolation, `AllTenantIDs`, API-layer coverage of all of the above |
+| `traffic_replay_test.go` **(new)** + additions to `remediation_test.go`/`remediation_api_test.go`/`store_test.go` | 12 | Real manifest parsing (IPv4 and IPv6, mask stripped; a real parse error for a bare scalar; a well-formed manifest with no `ipBlock` yielding no blocked IPs), the safe case, real collateral in the same namespace, a different namespace correctly ignored, the honest not-confirmed-safe case with no history, deterministic ordering; orchestration-level: unsafe overrides an otherwise-qualifying decision and replaces the stale reason, no manifest and already-disqualified decisions are never looked up at all, an unparseable manifest is treated conservatively, real fetch errors propagate, the policy toggle still computes but doesn't enforce; store-level: sums across raw + daily rollups (survives compaction) and tenant/cluster isolation; API-level: a real end-to-end collateral case through the real store and handler |
 
 Two new tests in `store_test.go` guard the WAL/connection-pool change
 specifically: `TestOpenStoreConnectionsShareRealDataAgainstAFile` (8 real
@@ -361,10 +367,10 @@ concurrent connections against a real file all see the same real
 ingested row) and the `:memory:`-stays-single-connection guard baked
 into `OpenStore` itself.
 
-Run: `cd controlplane && go test ./...` — **all 189 passing** (re-verified
-2026-08-03, `go test -race` clean), ~190-200s wall time under `-race`
-depending on cache (several tests use real 1.1s sleeps to get distinct
-`reported_at` second-granularity timestamps).
+Run: `cd controlplane && go test ./...` — **all 209 passing** (re-verified
+2026-08-05, `go test -race` clean at 331s), ~70s wall time without
+`-race` (several tests use real 1.1s sleeps to get distinct `reported_at`
+second-granularity timestamps).
 
 ### 3.7 New this session: six items from an external roadmap review, built for real
 
@@ -564,15 +570,16 @@ same discipline every manual verification pass in this project has used
 all along, now automated and repeatable instead of one-off. Runs against
 the system's `/usr/bin/google-chrome` (Playwright's bundled-browser
 install needs root, unavailable in this sandbox) via `launchOptions` in
-`playwright.config.ts`. 13 tests across 4 files (`auth`, `dashboard`,
-`role-gating`, `teams`), all passing against the live server: session
-cookie reaches the dashboard, wrong password gets a real 401, logout
-actually revokes the server-side session, a viewer's direct API POSTs
-get real 403s, an admin's real namespace→team mapping and real teammate
-invite both round-trip through the actual API. Caught a real bug along
-the way (the logout regression in §3.9). Run: `cd controlplane/web &&
-npm run test:e2e` (needs Node ≥20; system Node in this dev environment
-is 18, worked around with a portable Node 20 install).
+`playwright.config.ts`. **28 tests across 7 files** (`auth`, `dashboard`,
+`role-gating`, `teams`, `assistant`, `forecast`, `anomaly-watch`), all
+passing against the live server: session cookie reaches the dashboard,
+wrong password gets a real 401, logout actually revokes the server-side
+session, a viewer's direct API POSTs get real 403s, an admin's real
+namespace→team mapping and real teammate invite both round-trip through
+the actual API. Caught a real bug along the way (the logout regression in
+§3.9). Run: `cd controlplane/web && npm run test:e2e` (needs Node ≥20;
+system Node in this dev environment is 18, worked around with a portable
+Node 20 install at `~/.local/node20`).
 
 ### 3.11 Closed-loop recommendation outcome tracking (`outcome.go`/`outcome_api.go`)
 
@@ -1031,6 +1038,111 @@ both success and failure), full suite green (189 tests). 1 new E2E test
 asserting the honest empty state (this suite never sets `GROQ_API_KEY`,
 so zero real events is the actual truth, not an untested path).
 
+### 3.22 Real deterministic traffic-replay safety check (`traffic_replay.go`)
+
+The next safe increment on §3.16's dry-run remediation preview, and a
+direct answer to the real risk that section already named: the fix
+engine's generated `NetworkPolicy` (`agent/cmd/kharcha/fixengine.go`)
+always uses `podSelector: {}` — it applies to **every** real pod in the
+namespace, not just the one workload that got flagged. So "this manifest
+looks reasonable" was never the real question; "does any *other* real
+workload in that namespace also depend on the destination this policy
+would block" is. That's answerable directly from data this control plane
+already has, with no kernel tracing, no symbolic execution, and no
+cluster write access.
+
+**How it works.** `parseGeneratedNetworkPolicy` parses a manifest this
+same codebase generated (deliberately a minimal struct matching
+`networkPolicyDenyDestination`'s real output, not the full Kubernetes API
+surface) and extracts the real namespace plus the blocked IP(s), stripping
+the `/32`/`/128` mask since `flow_aggregate` stores bare IPs.
+`HistoricalFlowsToDestination` (new, `store.go`) sums real cost per real
+source workload for that destination across `flow_aggregate UNION ALL
+flow_aggregate_daily` — the same pattern `WorkloadCostGrowth` uses, so
+§3.18's compaction can't silently hide old collateral traffic from a
+safety check. `EvaluateTrafficReplay` (pure function) then splits that
+real history into the flagged workload's own traffic vs. everything else
+in the same namespace, and reports a real safety score.
+
+**Three honest edge cases, each deliberate, each tested**: a workload in
+a *different* namespace is never counted (this policy's `podSelector: {}`
+genuinely doesn't touch it); a manifest that can't be parsed is treated as
+**not confirmed safe** rather than silently skipped ("has a manifest" and
+"we verified the manifest" are different claims); and finding *no*
+historical traffic at all reports unsafe with an explicit note, never a
+default-safe — reporting confidence this check never earned would be
+exactly the failure mode this whole document exists to avoid.
+
+**A real performance regression, caught live and reverted, not shipped.**
+The first version ran the replay for every manifest-bearing decision and
+added a covering index (`tenant_id, cluster_id, dst_workload_or_endpoint`)
+to make the lookup fast. Both were wrong, and only real measurement showed
+it:
+- The index genuinely worked as intended in isolation — `EXPLAIN QUERY
+  PLAN` against a real 4.1M-row copy of the live database confirmed it was
+  being used, cutting a real lookup from **4.24s to 1.0s**.
+- But deployed to the live cluster it was a net disaster: `/api/v1/findings`
+  — a read path this feature never touches — regressed from **3.9s to
+  36–45s**, the pod pegged **above a full CPU core** (1029m, up from 4m),
+  and the WAL grew to 162MB and stopped checkpointing. Indexing a TEXT
+  column on a table under continuous real agent ingest cost far more in
+  write amplification than it saved on a rare read, overwhelming SQLite's
+  single writer and queueing every reader behind it.
+- Reverted (`DROP INDEX IF EXISTS`, so any database that ran the
+  intermediate build recovers on upgrade) and re-measured live: findings
+  back to **3.74s**, CPU back to **4m**.
+- The real fix was scoping, not indexing: `SimulateTrafficReplay` now only
+  runs the lookup for decisions that already cleared every *other* policy
+  bar. It's a gate on auto-applying, so a fix that isn't a candidate
+  anyway never needed the check. Net result on the live cluster:
+  `/api/v1/remediation/preview` is **3.70s — faster than the 11.4s it
+  measured before this feature existed**, because zero live fixes
+  currently qualify and so zero replay queries run.
+
+A related real risk found in the same pass: the Helm chart's readiness/
+liveness probes are `tcpSocket`, and the server only starts listening
+*after* `OpenStore` finishes schema setup — a one-time index build
+measured at ~26s on a real 4.1M-row database would have blown past the
+3-failure default and could have caused a restart loop on a first boot
+after upgrade. Both probes now carry explicit headroom
+(`failureThreshold: 30`), which is correct regardless of this specific
+index being reverted, since any future migration on a large real database
+has the same shape.
+
+**Verified live, honestly.** Against the real production cluster: 2 real
+findings currently carry a generated manifest (both
+`kube-system/traefik-...`), and the real replay confirmed both genuinely
+safe — no other real workload in `kube-system` talks to those
+destinations, verified by direct query, not assumed. The live cluster has
+**no** real collateral case right now (checked directly: zero destinations
+with more than one real namespaced workload), so the UI honestly shows no
+collateral warning rather than a manufactured one. The unsafe path was
+verified for real instead against a real running server with real
+ingested data — screenshotted showing "Would apply (1)" with *No
+collateral traffic found* and "Would skip (1)" with *Collateral traffic
+found*, naming the real affected workload (`checkout/reporting-xyz`) and
+its real ₹5 of traffic — plus a committed E2E test that drives the same
+path end-to-end.
+
+**A real UI bug caught by actually looking at the screenshot**, not by any
+test: the new explanatory copy rendered `podSelector: ` with the braces
+missing, because `{}` in JSX is an empty expression, not literal text.
+Fixed (`{"podSelector: {}"}`) and re-screenshotted.
+
+12 new Go tests (`traffic_replay_test.go` + additions to
+`remediation_test.go`, `remediation_api_test.go`, `store_test.go`),
+full suite green at **209** (up from 189), `go test -race` clean. 1 new
+E2E test plus a real fixture fix — the committed E2E fixture's
+`fix_manifest` had been a truncated stand-in with no
+`spec:`/`egress:`/`ipBlock:` section at all, i.e. not the shape
+`fixengine.go` actually emits; it's now the real complete manifest, so
+the suite tests the manifest the product genuinely generates. 28/28 E2E
+green (up from 27), with the other affected assertions updated to the
+real new fixture counts rather than weakened. One new direct dependency:
+`gopkg.in/yaml.v3` (the first non-SQLite/crypto dependency this module
+has taken on, for real YAML parsing rather than hand-rolled string
+matching).
+
 ### 3.21 Real proactive anomaly detection (`anomaly_watch.go`/`anomaly_watch_api.go`)
 
 Direct response to another fair external criticism: anomaly detection
@@ -1090,9 +1202,9 @@ new real edge, not a stale count left unfixed.
 
 ## 4. Frontend — component inventory
 
-39 `.tsx` files + 10 `.ts` files (excluding `.d.ts`), 5,836 lines in
+39 `.tsx` files + 10 `.ts` files (excluding `.d.ts`), 5,909 lines in
 `src/` — re-counted directly against the tree, not carried forward from
-an earlier session's number. Separately, `e2e/` holds 10 more `.ts`
+an earlier session's number. Separately, `e2e/` holds 11 more `.ts`
 files (the committed Playwright suite, §3.10 — a distinct concern from
 the app's own source, not counted here). React 18 + Vite 5 +
 TypeScript + Tailwind + Recharts + Framer Motion + GSAP + `cmdk` (new,
@@ -1346,7 +1458,38 @@ fields), `templates/deployment.yaml` (`CHIDRIXX_ADMIN_USER`/
 ingest token + the `create-tenant`/`create-user`/`create-token` exec
 commands), `templates/_helpers.tpl`.
 
-### 5.2 Live cluster state (k3d, as of this document — re-verified 2026-08-03 post-AI-eval/proactive-anomaly-watch)
+### 5.2 Live cluster state (k3d, as of this document — re-verified 2026-08-05 post-traffic-replay)
+
+**Re-measured 2026-08-05 while shipping §3.22** (the numbers further down
+this section are from the 2026-08-03 pass and are kept for the record;
+these supersede them):
+
+- `flow_aggregate` has grown to **4,125,883 real rows** (up from
+  2,391,057 two days earlier — continuous real ingestion, integrity-
+  checked `ok` on a freshly pulled copy). The live database file is now
+  **~1.19GB** (up from ~590MB), plus a real WAL.
+- **55 rows** in `recommendation_outcomes` (up from 26), still **0
+  applied and 0 measured** — the real, unchanged gap §9 names: this needs
+  real operators, not more code.
+- Real request latency, measured directly against the live deployment:
+  `/api/v1/findings` **3.74s**, `/api/v1/remediation/preview` **3.70s**
+  (down from 11.4s before §3.22, because that feature's scoping change
+  means zero replay queries run when no fix qualifies). Pod at **4m CPU**
+  idle.
+- **§3.22 verified honestly on real data**: exactly 2 real findings
+  currently carry a generated manifest (both `kube-system/traefik-...`),
+  and the real traffic replay confirms both genuinely safe. There is
+  currently **no** real collateral case anywhere in the live data
+  (checked directly: zero destinations with more than one real
+  namespaced workload), so the UI honestly shows no collateral warning —
+  the unsafe path was proven against a real running server with real
+  ingested data and in the committed E2E suite instead, not faked here.
+- Two extra admin users (`replay-verify`, `replay-verify2`) were
+  provisioned on tenant 1 via the real `create-user` CLI purely to verify
+  §3.22 through the real browser/API. Noted rather than left silent;
+  there is no `delete-user` subcommand today, so they're still present.
+
+### 5.2.1 Earlier snapshot (2026-08-03, post-AI-eval/proactive-anomaly-watch)
 
 - Namespace `chidrixx`: `chidrixx-controlplane` Deployment (Helm
   revision **8**), image `chidrixx-controlplane:dev` (rebuilt and
@@ -1461,10 +1604,17 @@ labeled, never filled with invented numbers:
 - **No automated release/versioning** — both charts are still `0.1.0`;
   there's no CI job that bumps versions or cuts releases automatically.
 - **A covering index for `flow_aggregate`** — retention/compaction now
-  exists (§3.18, closing the other half of this former gap), but a
-  covering index for the residual latest-per-cluster queries wasn't
-  added; not needed yet at this data volume, and a real, separate call
-  if the compacted table's query patterns ever need it.
+  exists (§3.18, closing the other half of this former gap), and as of
+  §3.22 this is no longer just "not attempted": a real covering index on
+  `(tenant_id, cluster_id, dst_workload_or_endpoint)` was actually built,
+  deployed to the live cluster, measured, and **reverted**. It did make
+  the targeted lookup ~4x faster, but the write amplification on a table
+  under continuous real agent ingest regressed unrelated read paths from
+  3.9s to 36-45s and pegged the pod above a full CPU core. The honest
+  conclusion: indexing this table is not a free win at this write volume,
+  and any future attempt needs the same live before/after measurement
+  rather than the assumption that an index is automatically an
+  improvement.
 - **A ClickHouse (or similar) storage-engine swap** — deliberately not
   done; see §3.18 for the real reasoning (SQLite+WAL already handles
   this project's actual real scale fine; a full swap would be costly
@@ -1615,8 +1765,9 @@ historical trend-change view, a real cost topology graph, a real
 predictive driver, real closed-loop recommendation-outcome tracking,
 a real Groq-backed grounded chat assistant, a real anomaly root-cause
 narrator, a real deeper forecasting model, a real dry-run closed-loop
-remediation preview, and a real offline placement simulator — not a
-static mockup or a single-shared-secret toy.
+remediation preview with a real traffic-replay safety check behind it,
+and a real offline placement simulator — not a static mockup or a
+single-shared-secret toy.
 
 `controlplane/` now has the same CI coverage `agent/` always had (§6,
 seven jobs total: build/test/Docker/Helm for both modules plus a real
@@ -1664,7 +1815,19 @@ loop now checks every real tenant on a recurring tick and surfaces new
 anomalies through a Topbar bell on every page, not just when an operator
 happens to ask, verified end-to-end with a real ingested anomaly in the
 E2E suite and honestly showing nothing on the live cluster where none
-currently exists.
+currently exists. The real traffic-replay safety check (§3.22) is the
+next safe increment on the remediation preview, answering the exact risk
+§3.16 itself named: the generated policy uses `podSelector: {}`, so
+before any fix can be called safe to auto-apply it is now replayed
+against this tenant's own real recorded traffic to see whether another
+real workload in that namespace also depends on the destination being
+blocked. That pass is also this document's clearest case of measurement
+beating intuition — the obvious optimization (a covering index) was
+built, deployed, measured on the real live system, found to make
+*unrelated* read paths ~10x slower through write amplification, and
+reverted; the fix that actually shipped was scoping the check to fixes
+that could genuinely qualify, which left the endpoint faster than it was
+before the feature existed.
 
 What's genuinely left, in priority order (§8): a real second-cloud agent
 deployment is blocked on a real, non-technical wall (India's GCP billing

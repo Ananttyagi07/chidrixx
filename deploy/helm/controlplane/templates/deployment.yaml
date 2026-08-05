@@ -52,14 +52,25 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
+          # The server only starts listening after OpenStore finishes schema
+          # setup, so both probes have to tolerate a one-time schema
+          # migration on a large existing database -- measured on a real
+          # 4.1M-row database, a single index operation there took ~26s,
+          # comfortably past the old 3-failure default.
+          # failureThreshold x periodSeconds gives real headroom well past
+          # that, so a first boot after upgrade can't trip a restart loop.
           readinessProbe:
             tcpSocket:
               port: http
             initialDelaySeconds: 2
+            periodSeconds: 10
+            failureThreshold: 30
           livenessProbe:
             tcpSocket:
               port: http
             initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 30
           volumeMounts:
             - name: data
               mountPath: /data

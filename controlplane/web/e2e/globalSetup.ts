@@ -103,13 +103,47 @@ export default async function globalSetup() {
           // test exercises the real "would apply" path, not only "would
           // skip" -- the cross_az fixture above never gets a real
           // manifest, by design (see remediation_test.go's comment).
+          // The manifest text below is the real, complete shape
+          // fixengine.go's networkPolicyDenyDestination actually emits
+          // (podSelector/policyTypes/egress/ipBlock/except included), not
+          // a truncated stand-in -- traffic_replay.go really parses this
+          // to find the blocked destination, so an abbreviated fixture
+          // would be testing a manifest the product never generates.
           source: "checkout/checkout-abc", destination: "203.0.113.5",
           path_class: "internet_egress", confidence: "high",
           bytes_tx: 2_000_000_000, bytes_rx: 0,
           cost_low_inr: 15, cost_high_inr: 20,
           fix_hint: "deny this destination if it's not required",
-          fix_manifest: "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: deny-203-0-113-5\n  namespace: checkout\n",
+          fix_manifest: 'apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: deny-203-0-113-5\n  namespace: checkout\nspec:\n  podSelector: {}   # narrow this to the specific workload\'s own labels\n  policyTypes: [Egress]\n  egress:\n    - to:\n        - ipBlock:\n            cidr: 0.0.0.0/0\n            except: ["203.0.113.5/32"]\n',
           savings_low_inr: 15, savings_high_inr: 20,
+          cloud: "aws", region: "ap-south-1",
+        },
+        {
+          // A real collateral-risk case for traffic_replay.go: same real
+          // shape as the qualifying fix above, but a SECOND real workload
+          // in the same real namespace (below) also talks to this exact
+          // destination. Because the generated policy uses
+          // podSelector: {} it would block that one too, so this must be
+          // disqualified despite clearing every other policy bar.
+          source: "checkout/checkout-abc", destination: "198.51.100.9",
+          path_class: "internet_egress", confidence: "high",
+          bytes_tx: 1_000_000_000, bytes_rx: 0,
+          cost_low_inr: 8, cost_high_inr: 12,
+          fix_hint: "deny this destination if it's not required",
+          fix_manifest: 'apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: deny-198-51-100-9\n  namespace: checkout\nspec:\n  podSelector: {}   # narrow this to the specific workload\'s own labels\n  policyTypes: [Egress]\n  egress:\n    - to:\n        - ipBlock:\n            cidr: 0.0.0.0/0\n            except: ["198.51.100.9/32"]\n',
+          savings_low_inr: 8, savings_high_inr: 12,
+          cloud: "aws", region: "ap-south-1",
+        },
+        {
+          // The real collateral itself: a genuinely different workload in
+          // the same real namespace, depending on the same real
+          // destination. Deliberately carries no fix_hint, so it is not
+          // its own remediation decision -- it exists purely as the real
+          // traffic that makes the fix above unsafe to auto-apply.
+          source: "checkout/reporting-xyz", destination: "198.51.100.9",
+          path_class: "internet_egress", confidence: "high",
+          bytes_tx: 400_000_000, bytes_rx: 0,
+          cost_low_inr: 3, cost_high_inr: 5,
           cloud: "aws", region: "ap-south-1",
         },
       ],

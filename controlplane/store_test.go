@@ -727,3 +727,74 @@ func TestOpenStoreConnectionsShareRealDataAgainstAFile(t *testing.T) {
 		}
 	}
 }
+
+func TestHistoricalFlowsToDestinationSumsAcrossRawAndDailyRollups(t *testing.T) {
+	s := testStore(t)
+	tenantID := testTenant(t, s)
+
+	old := time.Now().Add(-40 * 24 * time.Hour)
+	insertRawFindingAt(t, s, tenantID, "cluster-a", old, Finding{
+		Source: "checkout/checkout-1", Destination: "8.8.8.8", CostHighINR: 10,
+	})
+	if err := s.Ingest(tenantID, "cluster-a", []Finding{
+		{Source: "checkout/checkout-1", Destination: "8.8.8.8", CostHighINR: 30},
+	}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	before, err := s.HistoricalFlowsToDestination(tenantID, "cluster-a", "8.8.8.8")
+	if err != nil {
+		t.Fatalf("HistoricalFlowsToDestination before compaction: %v", err)
+	}
+	if len(before) != 1 || before[0].CostHighINR != 40 {
+		t.Fatalf("expected a real 40 total before compaction, got %+v", before)
+	}
+
+	cutoff := time.Now().Add(-DefaultRawRetention)
+	if _, deleted, err := s.CompactFindingsOlderThan(cutoff); err != nil || deleted != 1 {
+		t.Fatalf("CompactFindingsOlderThan: deleted=%d err=%v", deleted, err)
+	}
+
+	after, err := s.HistoricalFlowsToDestination(tenantID, "cluster-a", "8.8.8.8")
+	if err != nil {
+		t.Fatalf("HistoricalFlowsToDestination after compaction: %v", err)
+	}
+	if len(after) != 1 || after[0].SrcWorkload != "checkout/checkout-1" {
+		t.Fatalf("expected the same source workload after compaction, got %+v", after)
+	}
+	if after[0].CostHighINR != 40 {
+		t.Fatalf("expected the real 40 total to survive compaction (one raw row + one rolled-up row), got %v", after[0].CostHighINR)
+	}
+}
+
+func TestHistoricalFlowsToDestinationIsolatesByTenantAndCluster(t *testing.T) {
+	s := testStore(t)
+	tenantA := testTenant(t, s)
+	tenantB := testTenant(t, s)
+
+	if err := s.Ingest(tenantA, "cluster-a", []Finding{
+		{Source: "checkout/checkout-1", Destination: "8.8.8.8", CostHighINR: 10},
+	}); err != nil {
+		t.Fatalf("Ingest tenant A: %v", err)
+	}
+	if err := s.Ingest(tenantB, "cluster-a", []Finding{
+		{Source: "checkout/checkout-1", Destination: "8.8.8.8", CostHighINR: 999},
+	}); err != nil {
+		t.Fatalf("Ingest tenant B: %v", err)
+	}
+	// Same tenant A, but a different real cluster -- must not be counted
+	// as collateral for a policy scoped to cluster-a.
+	if err := s.Ingest(tenantA, "cluster-b", []Finding{
+		{Source: "checkout/checkout-2", Destination: "8.8.8.8", CostHighINR: 500},
+	}); err != nil {
+		t.Fatalf("Ingest tenant A cluster-b: %v", err)
+	}
+
+	got, err := s.HistoricalFlowsToDestination(tenantA, "cluster-a", "8.8.8.8")
+	if err != nil {
+		t.Fatalf("HistoricalFlowsToDestination: %v", err)
+	}
+	if len(got) != 1 || got[0].SrcWorkload != "checkout/checkout-1" || got[0].CostHighINR != 10 {
+		t.Fatalf("expected only tenant A's cluster-a row (cost 10), got %+v", got)
+	}
+}

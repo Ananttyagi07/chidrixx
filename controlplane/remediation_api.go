@@ -37,6 +37,15 @@ func handleRemediationPreview(store *Store) http.HandlerFunc {
 
 		decisions := EvaluateRemediation(findings, DefaultRemediationPolicy())
 
+		decisions, err = SimulateTrafficReplay(decisions, DefaultRemediationPolicy(), func(clusterID, destinationIP string) ([]HistoricalFlowCost, error) {
+			return store.HistoricalFlowsToDestination(tenantID, clusterID, destinationIP)
+		})
+		if err != nil {
+			log.Printf("remediation-preview: traffic replay: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(remediationPreviewResponse{Decisions: decisions})
 	}
