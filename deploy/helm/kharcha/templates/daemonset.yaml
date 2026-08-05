@@ -14,6 +14,24 @@ spec:
       labels:
         app.kubernetes.io/name: kharcha
         app.kubernetes.io/instance: {{ .Release.Name }}
+      {{- /* Resolved via a local with a default, not direct traversal: an
+             existing release upgraded with --reuse-values has no
+             .Values.metrics at all. See prometheusrule.yaml's comment.
+             hasKey so an explicit `false` is honoured while an absent key
+             still defaults to on. */ -}}
+      {{- $metrics := .Values.metrics | default dict }}
+      {{- if or (not (hasKey $metrics "scrapeAnnotations")) $metrics.scrapeAnnotations }}
+      # The agent already serves /metrics, but nothing was telling
+      # Prometheus to read it -- without this, the shipped alert on
+      # kharcha_map_utilization_ratio would silently never evaluate.
+      # These are the widely-used annotation conventions; they are inert
+      # metadata on a cluster whose Prometheus doesn't consult them, so
+      # they are on by default and harmless if unused.
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.metricsPort | quote }}
+        prometheus.io/path: "/metrics"
+      {{- end }}
     spec:
       serviceAccountName: {{ include "kharcha.fullname" . }}
       containers:

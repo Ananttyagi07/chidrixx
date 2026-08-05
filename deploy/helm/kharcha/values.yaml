@@ -5,6 +5,30 @@ image:
 
 metricsPort: 9300
 
+metrics:
+  # Adds the conventional prometheus.io/scrape annotations to the agent
+  # pods. Inert on a cluster whose Prometheus doesn't read them, so this
+  # defaults on -- without some scrape path the alerts below can never
+  # evaluate at all.
+  scrapeAnnotations: true
+
+  # Alerts on eBPF flow-map occupancy. Opt-in because PrometheusRule is a
+  # Prometheus Operator CRD: enabling it on a cluster without the operator
+  # makes `helm install` fail. Not running the operator? Load the same
+  # rules from deploy/prometheus/kharcha-alerts.yaml directly instead.
+  prometheusRule:
+    enabled: false
+    # Extra labels the cluster's Prometheus uses to select rule objects
+    # (e.g. `release: kube-prometheus-stack`).
+    labels: {}
+    # 0.85 = warn once the map is 85% full. The map evicts silently at
+    # 100%, so this is deliberately well short of saturation.
+    nearCapacityRatio: 0.85
+    nearCapacityFor: 10m
+    # Effectively full: real flows are very likely already being dropped.
+    atCapacityRatio: 0.98
+    atCapacityFor: 5m
+
 # How often to refresh Kubernetes pod/service/endpoint/node metadata
 # (FR-E1 target: <=10s). Shorter means fresher attribution for newly
 # created pods but more kubectl-exec load on the API server per node

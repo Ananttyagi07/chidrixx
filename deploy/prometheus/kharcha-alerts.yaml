@@ -1,0 +1,63 @@
+# Plain Prometheus alerting rules for the kharcha agent, for clusters not
+# running the Prometheus Operator. Load with a `rule_files` entry:
+#
+#   rule_files:
+#     - /etc/prometheus/rules/kharcha-alerts.yaml
+#
+# Clusters that DO run the operator should instead set
+# `metrics.prometheusRule.enabled=true` on the deploy/helm/kharcha chart,
+# which renders the same rules as a real PrometheusRule object. Keep the
+# two in sync if you edit either.
+#
+# These need the agent's /metrics endpoint (default :9300) to actually be
+# scraped. The Helm chart adds the conventional prometheus.io/scrape
+# annotations to the agent pods by default (metrics.scrapeAnnotations).
+groups:
+  - name: kharcha.ebpf-map
+    rules:
+      # The flow map is a BPF_MAP_TYPE_LRU_PERCPU_HASH: at capacity the
+      # kernel silently evicts the least-recently-used flow, with no
+      # notification and no kernel-side drop counter that could be read.
+      # Occupancy is therefore the only honest early warning available.
+      # This has already caused real undercounting once -- the map was
+      # originally sized 4096 and reported ~9.7k real concurrent
+      # connections as ~3.6k, caught only by a deliberate load test (see
+      # PROJECT_STATUS.md §2). For a cost-attribution tool, silent
+      # undercounting makes the bill look better than reality.
+      #
+      # kharcha_map_utilization_ratio is used rather than a raw entry
+      # count so that resizing max_entries in bpf/flow_cgroup.c rebases
+      # these thresholds automatically -- the agent reads capacity from
+      # the loaded map itself, not a hardcoded constant.
+      #
+      # The equivalent raw-count rule at the current 16384 map size would
+      # be `kharcha_map_entries > 13926`. Note the strictly greater-than:
+      # 0.85 * 16384 = 13926.4, so 13926 entries is really 84.998% (still
+      # under) and 13927 is the first count that genuinely crosses 85%.
+      # That boundary is pinned by a real test in the agent,
+      # TestMapUtilizationRatioCrossesEightyFivePercentAtTheRealBoundary.
+      - alert: KharchaFlowMapNearCapacity
+        expr: kharcha_map_utilization_ratio > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "kharcha eBPF flow map is {{ $value | humanizePercentage }} full on {{ $labels.instance }}"
+          description: >-
+            The eBPF flow map on this node is approaching capacity. Once full it
+            silently evicts the least-recently-used flow, which undercounts real
+            traffic and therefore understates real cost. Raise max_entries in
+            bpf/flow_cgroup.c and redeploy before it saturates.
+
+      - alert: KharchaFlowMapAtCapacity
+        expr: kharcha_map_utilization_ratio > 0.98
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "kharcha eBPF flow map is effectively full on {{ $labels.instance }} — real flows are likely being evicted"
+          description: >-
+            The eBPF flow map on this node is at or near its capacity, so the
+            kernel is very likely already evicting real flows. Byte counts and
+            cost figures from this node should be treated as undercounts until
+            max_entries is raised.

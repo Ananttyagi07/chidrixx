@@ -1,6 +1,6 @@
 # chidrixx — Project & Technical Status (Universal Reference)
 
-_Last updated: 2026-08-05 (a real deterministic traffic-replay safety check for generated NetworkPolicies shipped — §3.22 — including a real live performance regression that was caught by measurement and reverted rather than shipped, a real Helm probe-headroom fix, a real JSX rendering bug, and a real committed-E2E-fixture correction; all line/file/test counts below re-measured against the current tree)_
+_Last updated: 2026-08-05 (two passes the same day. First: a real deterministic traffic-replay safety check for generated NetworkPolicies — §3.22 — including a real live performance regression caught by measurement and reverted rather than shipped, a real Helm probe-headroom fix, a real JSX rendering bug, and a real committed-E2E-fixture correction. Second: real eBPF map-saturation alerting — §5.3 — closing the silent-LRU-eviction blind spot that already caused real undercounting once, which surfaced a real off-by-one in the 85% threshold and a real `--reuse-values` upgrade break. All line/file/test counts below re-measured against the current tree)_
 
 This is the single, complete picture of chidrixx: what's real and
 verified, what's explicitly not built (and why), what's actually left to
@@ -35,21 +35,22 @@ Two components, two Go modules, plus a frontend:
 
 ```
 chidrixx/
-├── agent/               module `chidrixx`            — 3,159 lines Go (excl. tests), 14 files
+├── agent/               module `chidrixx`            — 3,208 lines Go (excl. tests), 14 files
 │   └── cmd/
-│       ├── kharcha/     the eBPF agent binary          — 12 test files, 26 test functions
+│       ├── kharcha/     the eBPF agent binary          — 12 test files, 29 test functions
 │       └── loadgen/     load-test traffic generator (no tests)
 ├── controlplane/        module `chidrixx-controlplane` — 6,071 lines Go (excl. tests), 40 files
 │   ├── web/             React/Vite/TS dashboard SPA    — 5,909 lines TS/TSX, 39 .tsx + 10 .ts files
 │   └── e2e/             committed Playwright E2E suite — 11 .ts files (§3.10)
 ├── bpf/                 flow_cgroup.c + compiled flow_cgroup.o (committed binary, go:embed'd)
 ├── pricebook/            aws.yaml, gcp.yaml — real cited price data
-├── deploy/helm/          kharcha/ + controlplane/ charts, 18 template/value files total
+├── deploy/helm/          kharcha/ + controlplane/ charts, 19 template/value files total
+├── deploy/prometheus/    kharcha-alerts.yaml — eBPF map-saturation alert rules (§5.3)
 ├── test/load/            10k-concurrent-flow load harness + its own Dockerfile
 └── .github/workflows/   ci.yml — 7 jobs, both modules (§6)
 ```
 
-Total: **~15,100 lines** of hand-written Go + TypeScript across both
+Total: **~15,200 lines** of hand-written Go + TypeScript across both
 modules and the frontend (not counting vendored react-bits `.jsx`/`.css`
 files, which are third-party, installed via the real `shadcn` CLI; not
 counting the separate 11-file E2E suite). All four counts above were
@@ -86,7 +87,17 @@ update, not carried forward from an earlier pass.
   — the re-pricing map for real savings estimates (table below).
 - **Reporting**: CLI table, HTML report (`html.go`), Prometheus metrics
   (`metrics.go`: `kharcha_flow_bytes_total`, `kharcha_cost_inr`,
-  `kharcha_map_entries`, `kharcha_scrape_lag_seconds`).
+  `kharcha_map_entries`, `kharcha_map_max_entries`,
+  `kharcha_map_utilization_ratio`, `kharcha_scrape_lag_seconds`).
+- **eBPF map saturation warning** (`metrics.go`'s `recordMapUtilization`,
+  **new**): the flow map is a `BPF_MAP_TYPE_LRU_PERCPU_HASH`, so at
+  capacity the kernel silently evicts the least-recently-used flow —
+  there is no notification and **no kernel-side drop counter that could
+  be read**, so occupancy is the only honest early warning available.
+  Capacity comes from the loaded map's own `MaxEntries()`, never a copy
+  of `flow_cgroup.c`'s `16384` literal, so resizing the map rebases the
+  ratio and every alert bound to it automatically. See §5.3 for the
+  shipped alert rules and the real off-by-one this surfaced.
 - **Alerting** (`alert.go`): threshold and growth-ratio based, posts to a
   Slack-compatible webhook.
 - **Shipper** (`shipper.go`): posts findings to the control plane, Basic
@@ -147,7 +158,7 @@ Direct: `github.com/cilium/ebpf v0.22.0`,
 xxhash, goautoneg, client_model, common, procfs, x/sys, protobuf) — no
 surprise dependencies, none added without a direct reason.
 
-### 1.5 Agent test inventory — 26 test functions across 12 files
+### 1.5 Agent test inventory — 29 test functions across 12 files
 
 | File | Tests | Covers |
 |---|---|---|
@@ -159,7 +170,7 @@ surprise dependencies, none added without a direct reason.
 | `alert_test.go` + `alert_live_test.go` | — | Threshold/growth-ratio logic + a real posted webhook payload fetched back |
 | `kubernetes_integration_test.go` | — | Real API-server-backed pod/service/endpoint resolution |
 | `loader_test.go` + `prog_test.go` | — | Real BPF load/attach against a real kernel (privileged, CI-only) |
-| `html_test.go`, `metrics_test.go` | — | Report rendering, metric registration |
+| `html_test.go`, `metrics_test.go` | 4 (3 new) | Report rendering; metric registration and a real `/metrics` scrape asserting the exposed values; **new**: `TestRecordMapUtilizationComputesRealRatio`, `TestMapUtilizationRatioCrossesEightyFivePercentAtTheRealBoundary` (pins the real off-by-one at the 85% threshold), `TestRecordMapUtilizationLeavesRatioAloneWithUnknownCapacity` |
 
 Run: `cd agent && go test ./...` — **all passing** (re-verified
 2026-08-02), ~3s wall time (excludes privileged BPF tests which need
@@ -1436,15 +1447,17 @@ the same discipline as every other feature in this document.
 | Ingress/TLS (control plane) | **Real, optional.** `ingress.enabled` in the Helm chart, verified: a real request through Traefik with the right `Host` header + Basic Auth returned 200. |
 | cgroup-namespace limitation | **Documented, not fixable from our side** (inherent to Docker-in-Docker clusters like kind/k3d). The agent now gives a specific, actionable error instead of a generic `operation not permitted`. Real managed Kubernetes (EKS/GKE/AKS) doesn't hit this at all. |
 
-### 5.1 Helm chart inventory (18 files, both charts)
+### 5.1 Helm chart inventory (19 files, both charts)
 
 **`deploy/helm/kharcha`** (agent DaemonSet): `Chart.yaml`, `values.yaml`,
-`values-gcp.yaml` (real GCP price-book override), `templates/daemonset.yaml`,
-`templates/clusterrole.yaml` (new rule this session: `apps/deployments`
-get/list/watch, for deploy-event detection), `templates/clusterrolebinding.yaml`,
-`templates/serviceaccount.yaml`, `templates/configmap-pricebook.yaml`
-(key renamed `aws.yaml` → generic `pricebook.yaml` this session),
-`templates/_helpers.tpl`.
+`values-gcp.yaml` (real GCP price-book override), `templates/daemonset.yaml`
+(now also carries the conventional `prometheus.io/scrape` pod annotations,
+§5.3), `templates/clusterrole.yaml` (new rule this session:
+`apps/deployments` get/list/watch, for deploy-event detection),
+`templates/clusterrolebinding.yaml`, `templates/serviceaccount.yaml`,
+`templates/configmap-pricebook.yaml` (key renamed `aws.yaml` → generic
+`pricebook.yaml` this session), `templates/prometheusrule.yaml` (**new**,
+opt-in, §5.3), `templates/_helpers.tpl`.
 
 **`deploy/helm/controlplane`**: `Chart.yaml`, `values.yaml` (auth
 section rewritten this session: `adminUser`/`adminPasswordSecretName`/
@@ -1537,6 +1550,76 @@ these supersede them):
   cluster — no real cost anomaly currently exists there, and the UI
   shows that truthfully ("No new anomalies since the last check")
   rather than a fabricated alert.
+
+### 5.3 Real eBPF map-saturation alerting
+
+Closes a real, previously-invisible failure mode rather than a
+hypothetical one. The flow map is a `BPF_MAP_TYPE_LRU_PERCPU_HASH`: once
+full, the kernel silently evicts the least-recently-used flow. There is
+no notification and **no kernel-side drop counter to read** — so a
+literal "eviction counter" is not implementable, and map occupancy is the
+only honest early-warning signal that exists. This has already burned
+this project once for real: the map was originally sized 4096 and
+reported ~9.7k real concurrent connections as ~3.6k, caught only because
+someone deliberately ran a load test (§2). For a cost-attribution tool
+that failure is especially bad — silent undercounting makes the bill look
+*better* than reality.
+
+**What shipped:**
+- `kharcha_map_max_entries` and `kharcha_map_utilization_ratio`
+  (`metrics.go`'s `recordMapUtilization`). Capacity is read from the real
+  loaded `*ebpf.Map`'s `MaxEntries()`, never a second copy of
+  `flow_cgroup.c`'s literal, so resizing the map rebases the ratio and
+  every alert bound to it with no rule edits. Both the raw capacity and
+  the ratio are published so an operator can verify the ratio rather than
+  trust it.
+- Two alert rules — `KharchaFlowMapNearCapacity` (warning, ratio > 0.85
+  for 10m) and `KharchaFlowMapAtCapacity` (critical, > 0.98 for 5m) —
+  shipped twice, deliberately: as an opt-in `PrometheusRule` in the chart
+  (`metrics.prometheusRule.enabled`, **off by default** because rendering
+  a Prometheus Operator CRD on a cluster without the operator makes
+  `helm install` fail outright), and as a plain
+  `deploy/prometheus/kharcha-alerts.yaml` for clusters not running the
+  operator.
+- The agent pods now carry the conventional `prometheus.io/scrape`
+  annotations. Found while building this: the agent has always served
+  `/metrics`, but **nothing in the chart ever told Prometheus to read
+  it** — so an alert rule alone would have been permanently inert. On by
+  default, since annotations are harmless metadata on a cluster that
+  doesn't consult them.
+
+**Two real bugs this pass caught, neither by review:**
+1. **An off-by-one in the 85% threshold, caught by a test.** The obvious
+   raw-count fallback — `kharcha_map_entries > 13926` — is right only by
+   luck of being strictly greater-than: `0.85 × 16384 = 13926.4`, so
+   13926 entries is really **84.998%** (still under) and 13927 is the
+   first count that genuinely crosses 85%. A `>= 13926` rule would fire
+   early. Pinned by
+   `TestMapUtilizationRatioCrossesEightyFivePercentAtTheRealBoundary`.
+2. **A real upgrade-path break, caught by actually deploying.**
+   `helm upgrade --reuse-values` carries forward only the values a
+   release was originally installed with, so `.Values.metrics` does not
+   exist on an existing install and direct traversal failed the upgrade
+   with a nil-pointer error — exactly the self-inflicted upgrade break
+   §3.8 item 5 already records once. Fixed with `| default dict` locals
+   (sprig's `dig` is unusable here: it rejects Helm's `chartutil.Values`
+   type — also found by running it, not assumed). Re-verified against the
+   real failing command, plus the explicit-`false` and custom-threshold
+   paths.
+
+**Verified live, on real data**: `helm upgrade` to revision 6 against the
+real k3d cluster, real scrape annotations confirmed on the running pod,
+and the agent's real `/metrics` endpoint scraped directly —
+`kharcha_map_entries 1066`, `kharcha_map_max_entries 16384`,
+`kharcha_map_utilization_ratio 0.0650634765625` (exactly 1066/16384, and
+the capacity really read back from the loaded map). `helm lint` clean;
+the standalone rules file parses as valid YAML with both alerts intact.
+
+Worth recording alongside this: that live reading is **6.5% occupancy**,
+but the load test in §2 measured **10,543 concurrent flows against the
+same 16,384 map — about 64%**. Real headroom under burst is far thinner
+than the idle number suggests, which is precisely why the warning
+threshold is set well short of saturation.
 
 ---
 
@@ -1735,6 +1818,11 @@ across component comments:
 - **cgroup-namespace limitation is real and undocumented-around** — kind/k3d
   Docker-in-Docker environments hit a genuine `EPERM`; real managed
   Kubernetes (EKS/GKE/AKS) doesn't.
+- **There is no eBPF map eviction counter, and there cannot be one** —
+  `BPF_MAP_TYPE_LRU_PERCPU_HASH` evicts silently with no kernel-side
+  notification, so `kharcha_map_utilization_ratio` (§5.3) is an
+  *occupancy* signal, not a measured drop count. It warns that eviction
+  is imminent or likely; it never claims to count flows actually lost.
 - **A real second-cloud agent deployment is blocked on a real money
   decision** (India's GCP billing deposit requirement), not a technical
   gap — see §8 item 1. Deliberately not pushed through for a demo.

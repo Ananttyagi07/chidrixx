@@ -1,0 +1,76 @@
+{{- /*
+Values are resolved through `| default dict` locals rather than direct
+`.Values.metrics.prometheusRule.x` traversal. That is not style: an
+existing release upgraded with `helm upgrade --reuse-values` carries
+forward only the values it was originally installed with, so
+`.Values.metrics` genuinely does not exist yet and direct traversal fails
+the upgrade with a nil-pointer error. Caught for real by upgrading the
+live cluster's existing kharcha release, not in review -- same class of
+self-inflicted upgrade break as the image repository change recorded in
+PROJECT_STATUS.md §3.8. (sprig's `dig` is not usable here: it rejects
+Helm's chartutil.Values type.)
+*/ -}}
+{{- $metrics := .Values.metrics | default dict }}
+{{- $pr := $metrics.prometheusRule | default dict }}
+{{- if $pr.enabled }}
+# Requires the Prometheus Operator's PrometheusRule CRD, which is why this
+# is opt-in rather than on by default: rendering it on a cluster without
+# that CRD would make `helm install` fail outright. Clusters not running
+# the operator can load the identical rules from
+# deploy/prometheus/kharcha-alerts.yaml as a plain rule_files entry.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "kharcha.fullname" . }}
+  labels:
+    {{- include "kharcha.labels" . | nindent 4 }}
+    {{- with $pr.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: kharcha.ebpf-map
+      rules:
+        # The flow map is a BPF_MAP_TYPE_LRU_PERCPU_HASH: at capacity the
+        # kernel silently evicts the least-recently-used flow with no
+        # notification and no kernel-side drop counter to read. Occupancy
+        # is therefore the only honest early warning available. This has
+        # already caused real undercounting once (map sized 4096, ~9.7k
+        # real concurrent connections reported as ~3.6k -- see
+        # PROJECT_STATUS.md §2), which for a cost-attribution tool means
+        # the bill looks better than reality.
+        #
+        # The ratio is used rather than a raw entry count so resizing
+        # max_entries in bpf/flow_cgroup.c automatically rebases these
+        # thresholds. (An equivalent raw-count rule at the current 16384
+        # size would be `kharcha_map_entries > 13926` -- note strictly
+        # greater-than: 0.85 * 16384 = 13926.4, so 13926 entries is really
+        # 84.998% and 13927 is the first count that genuinely crosses 85%.
+        # That boundary is pinned by a real test,
+        # TestMapUtilizationRatioCrossesEightyFivePercentAtTheRealBoundary.)
+        - alert: KharchaFlowMapNearCapacity
+          expr: kharcha_map_utilization_ratio > {{ $pr.nearCapacityRatio | default 0.85 }}
+          for: {{ $pr.nearCapacityFor | default "10m" }}
+          labels:
+            severity: warning
+          annotations:
+            summary: "kharcha eBPF flow map is {{ `{{ $value | humanizePercentage }}` }} full on {{ `{{ $labels.instance }}` }}"
+            description: >-
+              The eBPF flow map on this node is approaching capacity. Once full it
+              silently evicts the least-recently-used flow, which undercounts real
+              traffic and therefore understates real cost. Raise max_entries in
+              bpf/flow_cgroup.c and redeploy before it saturates.
+
+        - alert: KharchaFlowMapAtCapacity
+          expr: kharcha_map_utilization_ratio > {{ $pr.atCapacityRatio | default 0.98 }}
+          for: {{ $pr.atCapacityFor | default "5m" }}
+          labels:
+            severity: critical
+          annotations:
+            summary: "kharcha eBPF flow map is effectively full on {{ `{{ $labels.instance }}` }} — real flows are likely being evicted"
+            description: >-
+              The eBPF flow map on this node is at or near its capacity, so the
+              kernel is very likely already evicting real flows. Byte counts and
+              cost figures from this node should be treated as undercounts until
+              max_entries is raised.
+{{- end }}

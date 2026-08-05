@@ -247,7 +247,10 @@ func scrape(
 		log.Printf("iterate error: %v", err)
 	}
 
-	mapEntries.Set(float64(len(cur)))
+	// MaxEntries() is read from the real loaded map rather than repeating
+	// bpf/flow_cgroup.c's max_entries literal, so resizing the map there
+	// keeps this ratio (and any alert bound to it) correct automatically.
+	recordMapUtilization(len(cur), m.MaxEntries())
 
 	return cur
 }
