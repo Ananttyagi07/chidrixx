@@ -74,8 +74,38 @@ spec:
                   name: {{ .Values.controlPlane.tokenSecretName }}
                   key: {{ .Values.controlPlane.tokenSecretKey }}
             {{- end }}
+          {{- /* Resolved via a local with a default so an existing release
+                 upgraded with --reuse-values (which has no .Values.security)
+                 still renders. Same reason as prometheusrule.yaml. */ -}}
+          {{- $sec := .Values.security | default dict }}
+          {{- $mode := $sec.mode | default "capabilities" }}
           securityContext:
-            privileged: {{ .Values.privileged }}
+            {{- if eq $mode "privileged" }}
+            # Fallback for kernels older than 5.8, which predate CAP_BPF and
+            # genuinely need the whole capability set to load a BPF program.
+            privileged: true
+            {{- else }}
+            # Least-privilege default: drop everything, add only what
+            # loading and attaching a cgroup_skb program genuinely needs --
+            # CAP_BPF for the bpf() syscall, CAP_NET_ADMIN because
+            # cgroup_skb is a networking program type. Verified on a real
+            # 6.17 kernel with the programs actually attached and real
+            # flows counted; CAP_PERFMON was tested and found unnecessary.
+            # See PROJECT_STATUS.md §5.4.
+            #
+            # NOTE: this still does NOT satisfy PodSecurity `baseline` or
+            # `restricted` -- neither allows adding CAP_BPF/CAP_NET_ADMIN,
+            # and both forbid the hostPath cgroup mount. No eBPF agent can
+            # meet those; this namespace needs an exemption either way.
+            # What this buys is a defensible, auditable posture instead of
+            # `privileged: true`.
+            privileged: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add:
+                {{- toYaml ($sec.capabilities | default (list "BPF" "NET_ADMIN")) | nindent 16 }}
+            {{- end }}
           ports:
             - name: metrics
               containerPort: {{ .Values.metricsPort }}

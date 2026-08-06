@@ -1,6 +1,6 @@
 # chidrixx — Project & Technical Status (Universal Reference)
 
-_Last updated: 2026-08-05 (two passes the same day. First: a real deterministic traffic-replay safety check for generated NetworkPolicies — §3.22 — including a real live performance regression caught by measurement and reverted rather than shipped, a real Helm probe-headroom fix, a real JSX rendering bug, and a real committed-E2E-fixture correction. Second: real eBPF map-saturation alerting — §5.3 — closing the silent-LRU-eviction blind spot that already caused real undercounting once, which surfaced a real off-by-one in the 85% threshold and a real `--reuse-values` upgrade break. All line/file/test counts below re-measured against the current tree)_
+_Last updated: 2026-08-06 (agent least-privilege pass — §5.4: `privileged: true` replaced with a verified, empirically-minimised two-capability set, closing the biggest enterprise deployability blocker. Previously, 2026-08-05, two passes: First: a real deterministic traffic-replay safety check for generated NetworkPolicies — §3.22 — including a real live performance regression caught by measurement and reverted rather than shipped, a real Helm probe-headroom fix, a real JSX rendering bug, and a real committed-E2E-fixture correction. Second: real eBPF map-saturation alerting — §5.3 — closing the silent-LRU-eviction blind spot that already caused real undercounting once, which surfaced a real off-by-one in the 85% threshold and a real `--reuse-values` upgrade break. All line/file/test counts below re-measured against the current tree)_
 
 This is the single, complete picture of chidrixx: what's real and
 verified, what's explicitly not built (and why), what's actually left to
@@ -1445,6 +1445,7 @@ the same discipline as every other feature in this document.
 | OCI chart repo on GHCR | **Real.** `oci://ghcr.io/ananttyagi07/charts/{kharcha,chidrixx-controlplane}` — packaged, pushed, pulled back down, and `helm template`d from the round-tripped artifact to confirm it's not corrupted. |
 | GHCR image + chart visibility | **Done.** All four packages (`chidrixx-agent`, `chidrixx-controlplane`, `charts/kharcha`, `charts/chidrixx-controlplane`) are now **public**, flipped via the GitHub web UI (GitHub's REST API 404s on the documented visibility-change endpoint even with a working `GET` and the right token scope — web-UI-only, confirmed by direct testing). Re-verified with zero credentials involved: `docker logout ghcr.io` then a clean `docker pull` of both images succeeded; both OCI Helm charts' `tags/list` returned 200 using a freshly-minted anonymous GHCR bearer token. |
 | Ingress/TLS (control plane) | **Real, optional.** `ingress.enabled` in the Helm chart, verified: a real request through Traefik with the right `Host` header + Basic Auth returned 200. |
+| Agent privilege | **Least-privilege by default (§5.4).** `privileged: false`, `drop: ALL`, and exactly two added capabilities (`CAP_BPF`, `CAP_NET_ADMIN`) — empirically minimised and verified live on a 6.17 kernel. Does not satisfy PodSecurity baseline/restricted (no eBPF agent can); a `privileged: true` fallback remains for pre-5.8 kernels. |
 | cgroup-namespace limitation | **Documented, not fixable from our side** (inherent to Docker-in-Docker clusters like kind/k3d). The agent now gives a specific, actionable error instead of a generic `operation not permitted`. Real managed Kubernetes (EKS/GKE/AKS) doesn't hit this at all. |
 
 ### 5.1 Helm chart inventory (19 files, both charts)
@@ -1550,6 +1551,57 @@ these supersede them):
   cluster — no real cost anomaly currently exists there, and the UI
   shows that truthfully ("No new anomalies since the last check")
   rather than a fabricated alert.
+
+### 5.4 Real least-privilege agent: `privileged: true` → 2 capabilities
+
+Closes the single biggest **deployability** blocker, not a feature gap.
+The agent previously ran `privileged: true`, which hands it the full
+capability set (verified on the live pod: `CapEff: 000001ffffffffff` —
+every capability the kernel has). For the enterprise buyer this product
+targets, that is the first thing a security review sees and the most
+common reason to say no outright.
+
+**What it runs as now**, verified on the real live pod, not just rendered:
+
+```json
+{"privileged": false, "allowPrivilegeEscalation": false,
+ "capabilities": {"drop": ["ALL"], "add": ["BPF", "NET_ADMIN"]}}
+```
+
+`CapEff` dropped from `000001ffffffffff` (all 40) to two bits.
+
+**The set was minimised empirically, not guessed.** The first attempt
+included `CAP_PERFMON` on the theory that BPF helpers need it. It was then
+removed and redeployed to the live cluster — the agent still loaded,
+attached, and counted real flows without it, so `cgroup_skb` genuinely
+needs no PERFMON-gated helper. The shipped default is the tested minimum:
+
+| Capability | Why it is genuinely required |
+|---|---|
+| `CAP_BPF` | the `bpf()` syscall itself — create maps, load programs (kernel 5.8+) |
+| `CAP_NET_ADMIN` | required to load **and** attach a networking program type (`cgroup_skb`) |
+
+`security.mode: privileged` remains available as a documented fallback for
+kernels older than 5.8, which predate `CAP_BPF` entirely.
+
+**Verified live at every step**, against the real k3d cluster on kernel
+**6.17**: deployed capability-mode, confirmed the eBPF programs really
+attached (no `EPERM`), confirmed real workload/pod metadata still
+resolving, and scraped the real metrics endpoint — `kharcha_map_entries
+2429` with the map genuinely loaded and counting. Then repeated the whole
+pass after removing `CAP_PERFMON`, and again after finalising the default.
+
+**What this honestly does NOT do — stated plainly, because the overclaim
+would be easy:** this does **not** make the agent pass PodSecurity
+`baseline` or `restricted`. Neither profile permits adding `CAP_BPF` or
+`CAP_NET_ADMIN` (their allow-list stops at things like
+`NET_BIND_SERVICE`), and both forbid the `hostPath` mount of
+`/sys/fs/cgroup` that attaching to the cgroup hierarchy requires. **No
+eBPF-based agent can satisfy those profiles** — that namespace needs an
+exemption regardless of vendor. What this change buys is a security
+conversation that is winnable: an auditable, explainable, two-capability
+posture with `allowPrivilegeEscalation: false`, instead of a blanket
+`privileged: true` that ends the conversation before it starts.
 
 ### 5.3 Real eBPF map-saturation alerting
 

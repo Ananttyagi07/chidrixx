@@ -94,8 +94,31 @@ controlPlane:
 
 resources: {}
 
-# eBPF program loading requires CAP_BPF against the real kernel. privileged
-# is the simplest path and what this chart uses by default; per the build
-# manual, tighten to the specific capabilities (BPF, PERFMON, NET_ADMIN)
-# once you've confirmed the minimal set on your kernel.
+# How much privilege the agent asks the kernel for.
+#
+#   mode: capabilities  (default) -- drop ALL, add only what loading and
+#     attaching a cgroup_skb program actually needs. Requires kernel 5.8+
+#     (CAP_BPF landed in 5.8; 5.11+ also removed the memlock rlimit that
+#     used to need CAP_SYS_RESOURCE). This is the mode that has a chance of
+#     passing a restricted-PodSecurity namespace and an enterprise review.
+#
+#   mode: privileged -- the old behaviour, for kernels older than 5.8 that
+#     genuinely cannot load BPF without the full set.
+#
+# Verified working with the default capability set against a real 6.17
+# kernel with the eBPF programs really attached and real data flowing --
+# see PROJECT_STATUS.md §5.4. Confirm on your own kernel before assuming.
+security:
+  mode: capabilities
+  # This is the real, empirically-minimised set -- not a guess. CAP_PERFMON
+  # was included first, then removed after testing showed the agent loads,
+  # attaches and counts real flows without it (cgroup_skb needs no
+  # PERFMON-gated helpers). Add PERFMON back only if your kernel proves to
+  # need it; the chart accepts any list here.
+  capabilities:
+    - BPF        # bpf() syscall: create maps, load programs (kernel 5.8+)
+    - NET_ADMIN  # required to load+attach networking program types (cgroup_skb)
+
+# Deprecated: kept only so `--set privileged=true` on an existing install
+# keeps parsing. It no longer controls anything -- use security.mode above.
 privileged: true
