@@ -1,0 +1,102 @@
+name: release
+
+# Publishes both container images and both Helm charts to GHCR on a real
+# version tag. This exists because the published artifacts silently drifted
+# from the repo once already: charts sat at 0.1.0 and images at a mutable
+# `latest` for days while real fixes -- including the least-privilege
+# securityContext change -- landed on master. Anyone installing from the
+# registry got a build that predated all of it. Cutting a tag is now the
+# single action that publishes everything, in lockstep.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 0.2.0), without the leading v"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing version $VERSION"
+
+      # The charts default image.tag to .Chart.AppVersion, so a chart whose
+      # appVersion doesn't match the tag being published would deploy an
+      # image that doesn't exist. Fail loudly here rather than ship that.
+      - name: Verify chart appVersion matches the tag
+        run: |
+          V="${{ steps.v.outputs.version }}"
+          for c in kharcha controlplane; do
+            got=$(sed -n 's/^appVersion:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' "deploy/helm/$c/Chart.yaml")
+            if [ "$got" != "$V" ]; then
+              echo "::error::deploy/helm/$c/Chart.yaml appVersion is '$got', expected '$V'"
+              exit 1
+            fi
+          done
+          echo "both charts declare appVersion $V"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push agent image
+        run: |
+          V="${{ steps.v.outputs.version }}"
+          IMG=ghcr.io/${{ github.repository_owner }}/chidrixx-agent
+          docker build -t "$IMG:$V" -t "$IMG:latest" -f Dockerfile .
+          docker push "$IMG:$V"
+          docker push "$IMG:latest"
+
+      - name: Build and push control plane image
+        run: |
+          V="${{ steps.v.outputs.version }}"
+          IMG=ghcr.io/${{ github.repository_owner }}/chidrixx-controlplane
+          docker build -t "$IMG:$V" -t "$IMG:latest" -f controlplane/Dockerfile controlplane
+          docker push "$IMG:$V"
+          docker push "$IMG:latest"
+
+      - name: Package and push Helm charts
+        run: |
+          V="${{ steps.v.outputs.version }}"
+          helm registry login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
+          for c in kharcha controlplane; do
+            helm package "deploy/helm/$c" --version "$V" --app-version "$V" -d /tmp/charts
+          done
+          for pkg in /tmp/charts/*.tgz; do
+            helm push "$pkg" "oci://ghcr.io/${{ github.repository_owner }}/charts"
+          done
+
+      # Prove the published artifacts are actually installable by an
+      # anonymous user -- the real customer path -- rather than assuming a
+      # successful push means a working release.
+      - name: Verify anonymous pull of the published charts
+        run: |
+          V="${{ steps.v.outputs.version }}"
+          helm registry logout ghcr.io || true
+          mkdir -p /tmp/verify && cd /tmp/verify
+          helm pull "oci://ghcr.io/${{ github.repository_owner }}/charts/kharcha" --version "$V"
+          helm pull "oci://ghcr.io/${{ github.repository_owner }}/charts/chidrixx-controlplane" --version "$V"
+          ls -la
+          helm template t "./kharcha-$V.tgz" > /dev/null
+          helm template t "./chidrixx-controlplane-$V.tgz" > /dev/null
+          echo "published charts pull and render anonymously"

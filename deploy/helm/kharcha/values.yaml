@@ -1,6 +1,12 @@
 image:
   repository: ghcr.io/ananttyagi07/chidrixx-agent
-  tag: latest
+  # Empty means "use the chart's own appVersion", so the chart and the
+  # image it deploys can never silently drift apart. Set explicitly only
+  # to pin an older image or to run a locally-built tag (e.g. "dev").
+  # Deliberately not "latest": a mutable tag combined with
+  # imagePullPolicy: IfNotPresent leaves nodes running whatever they
+  # happened to cache, which is unreproducible and hard to debug.
+  tag: ""
   pullPolicy: IfNotPresent
 
 metricsPort: 9300
@@ -99,8 +105,15 @@ resources: {}
 #   mode: capabilities  (default) -- drop ALL, add only what loading and
 #     attaching a cgroup_skb program actually needs. Requires kernel 5.8+
 #     (CAP_BPF landed in 5.8; 5.11+ also removed the memlock rlimit that
-#     used to need CAP_SYS_RESOURCE). This is the mode that has a chance of
-#     passing a restricted-PodSecurity namespace and an enterprise review.
+#     used to need CAP_SYS_RESOURCE).
+#
+#     To be accurate about what this does and does not achieve: it does NOT
+#     make the agent pass PodSecurity `baseline` or `restricted`. Neither
+#     profile allows adding CAP_BPF/CAP_NET_ADMIN, and both forbid the
+#     hostPath cgroup mount -- no eBPF agent can satisfy them, so that
+#     namespace needs an exemption regardless of vendor. What it does buy
+#     is an auditable, defensible posture (two capabilities, each with a
+#     stated reason) instead of a blanket privileged: true.
 #
 #   mode: privileged -- the old behaviour, for kernels older than 5.8 that
 #     genuinely cannot load BPF without the full set.

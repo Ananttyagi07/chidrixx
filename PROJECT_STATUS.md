@@ -1,6 +1,6 @@
 # chidrixx — Project & Technical Status (Universal Reference)
 
-_Last updated: 2026-08-06 (agent least-privilege pass — §5.4: `privileged: true` replaced with a verified, empirically-minimised two-capability set, closing the biggest enterprise deployability blocker. Previously, 2026-08-05, two passes: First: a real deterministic traffic-replay safety check for generated NetworkPolicies — §3.22 — including a real live performance regression caught by measurement and reverted rather than shipped, a real Helm probe-headroom fix, a real JSX rendering bug, and a real committed-E2E-fixture correction. Second: real eBPF map-saturation alerting — §5.3 — closing the silent-LRU-eviction blind spot that already caused real undercounting once, which surfaced a real off-by-one in the 85% threshold and a real `--reuse-values` upgrade break. All line/file/test counts below re-measured against the current tree)_
+_Last updated: 2026-08-06 (two passes: §5.5 — published GHCR artifacts had silently drifted from the repo, so charts+images are now versioned at 0.2.0, `image.tag` defaults to the chart's own appVersion instead of a mutable `latest`, and a real release workflow publishes both in lockstep and re-verifies them anonymously. And §5.4: `privileged: true` replaced with a verified, empirically-minimised two-capability set, closing the biggest enterprise deployability blocker. Previously, 2026-08-05, two passes: First: a real deterministic traffic-replay safety check for generated NetworkPolicies — §3.22 — including a real live performance regression caught by measurement and reverted rather than shipped, a real Helm probe-headroom fix, a real JSX rendering bug, and a real committed-E2E-fixture correction. Second: real eBPF map-saturation alerting — §5.3 — closing the silent-LRU-eviction blind spot that already caused real undercounting once, which surfaced a real off-by-one in the 85% threshold and a real `--reuse-values` upgrade break. All line/file/test counts below re-measured against the current tree)_
 
 This is the single, complete picture of chidrixx: what's real and
 verified, what's explicitly not built (and why), what's actually left to
@@ -1552,6 +1552,38 @@ these supersede them):
   shows that truthfully ("No new anomalies since the last check")
   rather than a fabricated alert.
 
+### 5.5 Real versioned releases — published artifacts no longer drift from the repo
+
+A real, customer-facing bug, found by actually pulling what a customer
+would pull rather than trusting that publishing had happened: the OCI
+charts were pinned at **`0.1.0` (pushed 2026-08-01)** and both images at a
+mutable **`latest` (pushed 2026-07-31)**, while master kept moving. Anyone
+running the documented install command got a build predating the traffic-
+replay safety check, the map-saturation alerting, *and* §5.4's
+least-privilege securityContext — i.e. the single change that matters most
+to the enterprise buyer this product targets was invisible to every real
+installer.
+
+**Three things fixed, not one:**
+
+1. **Both charts and both images published at `0.2.0`** — verified by
+   logging out entirely and pulling anonymously (the real customer path):
+   the published chart now renders the `drop: ALL` / two-capability
+   securityContext, and `docker pull` of `chidrixx-agent:0.2.0` succeeds
+   with no credentials.
+2. **`image.tag` no longer defaults to `latest`.** It now defaults to the
+   chart's own `.Chart.AppVersion`, so a chart and the image it deploys
+   cannot silently diverge. `latest` combined with the chart's
+   `imagePullPolicy: IfNotPresent` was a genuine footgun: nodes keep
+   whatever they cached, so two nodes in one cluster could run different
+   builds with no way to tell from the manifest.
+3. **`.github/workflows/release.yml`** publishes both images and both
+   charts on a real `v*.*.*` tag. It refuses to publish if a chart's
+   `appVersion` doesn't match the tag (otherwise the chart would deploy an
+   image tag that doesn't exist), and it finishes by logging out and
+   re-pulling the published charts anonymously — so a green release means
+   the artifacts were actually verified installable, not merely uploaded.
+
 ### 5.4 Real least-privilege agent: `privileged: true` → 2 capabilities
 
 Closes the single biggest **deployability** blocker, not a feature gap.
@@ -1736,8 +1768,11 @@ labeled, never filled with invented numbers:
   time windows) — deliberately, since the real production data doesn't
   span enough calendar days to honestly fit a seasonal component yet
   (checked directly, not assumed — see §3.14/§3.15).
-- **No automated release/versioning** — both charts are still `0.1.0`;
-  there's no CI job that bumps versions or cuts releases automatically.
+- **No automated *version bumping*** — `.github/workflows/release.yml`
+  now publishes both images and both charts to GHCR in lockstep on a real
+  `v*.*.*` tag (§5.5), and verifies the result pulls anonymously. What is
+  still manual is deciding and editing the version number itself; nothing
+  auto-increments it or generates a changelog.
 - **A covering index for `flow_aggregate`** — retention/compaction now
   exists (§3.18, closing the other half of this former gap), and as of
   §3.22 this is no longer just "not attempted": a real covering index on

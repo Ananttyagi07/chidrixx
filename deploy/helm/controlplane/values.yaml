@@ -1,6 +1,12 @@
 image:
   repository: ghcr.io/ananttyagi07/chidrixx-controlplane
-  tag: latest
+  # Empty means "use the chart's own appVersion", so the chart and the
+  # image it deploys can never silently drift apart. Set explicitly only
+  # to pin an older image or to run a locally-built tag (e.g. "dev").
+  # Deliberately not "latest": a mutable tag combined with
+  # imagePullPolicy: IfNotPresent leaves nodes running whatever they
+  # happened to cache, which is unreproducible and hard to debug.
+  tag: ""
   pullPolicy: IfNotPresent
 
 service:
