@@ -1,6 +1,6 @@
 # chidrixx — YC Interview Prep
 
-_Built 2026-08-05. Every number here is MEASURED from the real system and
+_Built 2026-08-05, updated 2026-08-06. Every number here is MEASURED from the real system and
 traceable to PROJECT_STATUS.md or PRICING.md. Do not quote a number in an
 interview that isn't in this file — if you can't trace it, don't say it._
 
@@ -37,8 +37,8 @@ If you fumble any of these, it reads as "he didn't build this."
 | Agent CPU overhead | **4m CPU = 0.05%** (was 133m/1.66% before the kubectl-exec fix) |
 | Load-tested concurrent flows | **10,543** at 27m CPU (0.34%) |
 | Real rows in live production DB | **4,125,883** |
-| Total hand-written code | **~15,200 lines** Go + TypeScript |
-| Backend tests / E2E tests | **209 Go** / **28 Playwright** |
+| Total hand-written code | **~15,400 lines** Go + TypeScript |
+| Backend tests / E2E tests | **219 Go** (+29 agent) / **28 Playwright** |
 | Real API endpoints | **21** |
 | Path classes classified | **8** (same-node → cross-AZ → cross-region → NAT → internet) |
 
@@ -103,11 +103,21 @@ That's a fair hit. Honest answer: cost is where you can prove ROI in a
 demo; security is a longer sale for an unknown vendor.
 
 ### "What's stopping a customer from deploying this today?"
-> **"It needs `privileged: true` and a hostPath mount. Clusters on restricted
-> Pod Security Admission will reject it. Narrowing to `CAP_BPF`/`CAP_PERFMON`
-> is the top item on my list."**
+> **"Nothing technical that I know of. It used to need `privileged: true` —
+> now it runs `privileged: false`, drops ALL capabilities and adds exactly
+> two, `CAP_BPF` and `CAP_NET_ADMIN`. I minimised that by testing, not
+> guessing: I had `CAP_PERFMON` in there too, removed it, and confirmed the
+> programs still load and count real flows without it."**
 
-Knowing your own blocker cold is a *strength* signal, not a weakness.
+If pushed on PodSecurity, **do not overclaim** — the honest answer wins:
+
+> **"It still doesn't pass `baseline` or `restricted` — neither allows adding
+> those capabilities, and both forbid the hostPath cgroup mount. No eBPF
+> agent can. That namespace needs an exemption whichever vendor you pick.
+> What changed is that it's now a reviewable ask instead of a blanket
+> `privileged: true`."**
+
+Knowing the exact remaining limit of your own fix is a strength signal.
 
 ### "What have you learned from users?"
 If the honest answer is still "I haven't talked to any" — **fix this before
@@ -118,8 +128,10 @@ you apply.** There is no good version of this answer without conversations.
 > cluster, so gross margin is ~88%."**
 
 ### "What's your biggest risk?"
-> **"That security teams won't allow a privileged kernel agent from an unknown
-> vendor. That's why capability-narrowing matters more than any feature."**
+> **"That security teams won't allow a kernel-level agent from an unknown
+> vendor at all. I've removed the technical reasons to say no — two
+> capabilities, no privileged mode, aliased data to the LLM. What's left is
+> pure trust, and that's what I need customers and this batch for."**
 
 ---
 
@@ -185,14 +197,27 @@ of catching your own wrong assumptions — that instinct is the asset.
 
 ## 6. Do this before applying (in priority order)
 
-1. **Talk to 5 real EKS operators.** Nothing else on this list matters as
-   much. It fixes the single worst answer in the application.
-2. **Narrow the agent's privileges** to `CAP_BPF`/`CAP_PERFMON`. Turns
-   "interesting demo" into "deployable."
-3. **Fix the stale published charts** (`0.1.0` predates weeks of work — a
-   customer installing today gets an old build).
-4. **Have a real answer for "why solo."**
-5. **Practice the 10-minute format**, out loud, being interrupted.
+1. **Talk to 5 real EKS operators.** Nothing else on this list comes close.
+   It fixes the single worst answer in the application, and it is the only
+   item here that cannot be solved by writing code.
+2. **Have a real answer for "why solo."**
+3. **Practice the 10-minute format**, out loud, being interrupted.
+
+**Done since this doc was written** (2026-08-06) — the technical blockers
+that used to sit at #2 and #3 are closed:
+
+- ✅ **Agent privileges narrowed.** `privileged: false`, `drop: ALL`, two
+  capabilities. Empirically minimised (`CAP_PERFMON` tested and removed)
+  and verified live on a 6.17 kernel.
+- ✅ **Published artifacts current.** Charts and images at `0.2.0`,
+  `image.tag` derives from the chart's `appVersion` so they can't drift,
+  and a release workflow re-verifies anonymous installability.
+- ✅ **AI data boundary.** Identifiers pseudonymised and generated
+  manifests dropped before anything reaches Groq, default-on, with
+  per-request audit logging.
+
+That's worth saying in the interview *only if asked* — it's evidence of
+velocity, not of demand. Do not let it substitute for #1.
 
 ---
 
@@ -200,11 +225,17 @@ of catching your own wrong assumptions — that instinct is the asset.
 
 **What's genuinely strong:** a working, verified, technically deep product
 built solo; unusual engineering rigor; a documented honesty audit most
-companies would never publish; real measured unit economics.
+companies would never publish; real measured unit economics; and a
+deployment story that now survives a security review instead of ending it.
 
 **What's genuinely weak:** zero users, zero revenue, zero user
-conversations, solo founder, a crowded category with an IBM-backed
-incumbent, and a deployment model security teams may reject.
+conversations, solo founder, and a crowded category with an IBM-backed
+incumbent.
+
+Note what changed and what didn't. Three technical weaknesses came off
+that second list in two days. The four that decide the outcome are all
+still there, and none of them are engineering problems. That asymmetry is
+the single most important thing to understand about your own position.
 
 Both lists are true. Bring both. The founders who get in are usually the
 ones who describe the second list more accurately than the partners could.
