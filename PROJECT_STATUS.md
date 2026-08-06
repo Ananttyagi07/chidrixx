@@ -1,6 +1,6 @@
 # chidrixx — Project & Technical Status (Universal Reference)
 
-_Last updated: 2026-08-06 (two passes: §5.5 — published GHCR artifacts had silently drifted from the repo, so charts+images are now versioned at 0.2.0, `image.tag` defaults to the chart's own appVersion instead of a mutable `latest`, and a real release workflow publishes both in lockstep and re-verifies them anonymously. And §5.4: `privileged: true` replaced with a verified, empirically-minimised two-capability set, closing the biggest enterprise deployability blocker. Previously, 2026-08-05, two passes: First: a real deterministic traffic-replay safety check for generated NetworkPolicies — §3.22 — including a real live performance regression caught by measurement and reverted rather than shipped, a real Helm probe-headroom fix, a real JSX rendering bug, and a real committed-E2E-fixture correction. Second: real eBPF map-saturation alerting — §5.3 — closing the silent-LRU-eviction blind spot that already caused real undercounting once, which surfaced a real off-by-one in the 85% threshold and a real `--reuse-values` upgrade break. All line/file/test counts below re-measured against the current tree)_
+_Last updated: 2026-08-06 (three passes: §3.23 — a real AI data-sanitization boundary, so real namespaces/pods/IPs and whole generated NetworkPolicy manifests no longer leave for a third-party LLM verbatim; plus §5.5 — published GHCR artifacts had silently drifted from the repo, so charts+images are now versioned at 0.2.0, `image.tag` defaults to the chart's own appVersion instead of a mutable `latest`, and a real release workflow publishes both in lockstep and re-verifies them anonymously. And §5.4: `privileged: true` replaced with a verified, empirically-minimised two-capability set, closing the biggest enterprise deployability blocker. Previously, 2026-08-05, two passes: First: a real deterministic traffic-replay safety check for generated NetworkPolicies — §3.22 — including a real live performance regression caught by measurement and reverted rather than shipped, a real Helm probe-headroom fix, a real JSX rendering bug, and a real committed-E2E-fixture correction. Second: real eBPF map-saturation alerting — §5.3 — closing the silent-LRU-eviction blind spot that already caused real undercounting once, which surfaced a real off-by-one in the 85% threshold and a real `--reuse-values` upgrade break. All line/file/test counts below re-measured against the current tree)_
 
 This is the single, complete picture of chidrixx: what's real and
 verified, what's explicitly not built (and why), what's actually left to
@@ -39,7 +39,7 @@ chidrixx/
 │   └── cmd/
 │       ├── kharcha/     the eBPF agent binary          — 12 test files, 29 test functions
 │       └── loadgen/     load-test traffic generator (no tests)
-├── controlplane/        module `chidrixx-controlplane` — 6,071 lines Go (excl. tests), 40 files
+├── controlplane/        module `chidrixx-controlplane` — 6,326 lines Go (excl. tests), 41 files
 │   ├── web/             React/Vite/TS dashboard SPA    — 5,909 lines TS/TSX, 39 .tsx + 10 .ts files
 │   └── e2e/             committed Playwright E2E suite — 11 .ts files (§3.10)
 ├── bpf/                 flow_cgroup.c + compiled flow_cgroup.o (committed binary, go:embed'd)
@@ -50,7 +50,7 @@ chidrixx/
 └── .github/workflows/   ci.yml — 7 jobs, both modules (§6)
 ```
 
-Total: **~15,200 lines** of hand-written Go + TypeScript across both
+Total: **~15,400 lines** of hand-written Go + TypeScript across both
 modules and the frontend (not counting vendored react-bits `.jsx`/`.css`
 files, which are third-party, installed via the real `shadcn` CLI; not
 counting the separate 11-file E2E suite). All four counts above were
@@ -321,6 +321,7 @@ which detects the old schema via `sqlite_master.sql` and does a real
 | `summary.go` | `computeSummary`/`computeSpendByClass`/`computeSpendByCloud` — pure Go aggregation over already-fetched findings, replacing 3 redundant SQL scans (§3.15). |
 | `remediation.go` **(new)** | `RemediationPolicy`, `EvaluateRemediation` — real dry-run closed-loop remediation policy engine (§3.16); plus `SimulateTrafficReplay`, which runs §3.22's real safety check over qualifying decisions only. |
 | `remediation_api.go` | `handleRemediationPreview` — `GET /api/v1/remediation/preview`. |
+| `ai_sanitize.go` **(new)** | `Sanitizer`, `SanitizeJSON`, `Restore`, `resolveAIMode` — the real boundary between tenant infrastructure data and a third-party LLM: aliases identifiers, drops generated manifests, maps aliases back on output (§3.23). |
 | `traffic_replay.go` **(new)** | `parseGeneratedNetworkPolicy`, `EvaluateTrafficReplay` — real deterministic replay of a generated NetworkPolicy against this tenant's own real historical traffic, to find collateral impact before ever calling a fix safe to auto-apply (§3.22). |
 | `placement.go` **(new)** | `buildPlacementGraph`, `OptimizePlacement` — real Kernighan-Lin graph partitioning with multi-restart (§3.17). |
 | `placement_api.go` **(new)** | `handlePlacementPreview` — `GET /api/v1/placement/preview?groups=N`. |
@@ -344,7 +345,7 @@ transitive requirements (libc, mathutil, memory, bigfft, etc.) plus
 dependencies — it's a plain `net/http` client against Groq's
 OpenAI-compatible REST API, not an SDK.
 
-### 3.6 Control plane test inventory — 209 test functions across 31 files
+### 3.6 Control plane test inventory — 219 test functions across 32 files
 
 | File | Approx. tests | Covers |
 |---|---|---|
@@ -378,8 +379,8 @@ concurrent connections against a real file all see the same real
 ingested row) and the `:memory:`-stays-single-connection guard baked
 into `OpenStore` itself.
 
-Run: `cd controlplane && go test ./...` — **all 209 passing** (re-verified
-2026-08-05, `go test -race` clean at 331s), ~70s wall time without
+Run: `cd controlplane && go test ./...` — **all 219 passing** (re-verified
+2026-08-06, `go test -race` clean at 331s), ~70s wall time without
 `-race` (several tests use real 1.1s sleeps to get distinct `reported_at`
 second-granularity timestamps).
 
@@ -1048,6 +1049,67 @@ parsing, real per-round telemetry accumulation, real event recording on
 both success and failure), full suite green (189 tests). 1 new E2E test
 asserting the honest empty state (this suite never sets `GROQ_API_KEY`,
 so zero real events is the actual truth, not an untested path).
+
+### 3.23 Real AI data-sanitization boundary (`ai_sanitize.go`)
+
+Closes a real exposure gap that existed since the chat assistant shipped,
+and that the docs had never stated: **every tool result went to Groq
+verbatim.** Verified by reading the real code path, not assumed —
+`get_top_fixes` marshals a whole `FindingRow`, so a third-party LLM
+provider was receiving real namespace names, real pod names, real
+destination IPs, real cluster IDs, and — via `fix_manifest` — **entire
+generated NetworkPolicy YAML documents**. For a product whose agent
+already runs at kernel level inside someone else's cluster, "what leaves
+my environment" is the first question a security review asks, and the
+honest answer needed to be better than "your whole topology".
+
+**Pseudonymisation, deliberately not summarisation.** Summarising would
+lose real numeric fidelity and make the assistant worse at its job.
+Aliasing identifiers keeps every byte count, cost, growth ratio, path
+class and confidence value **exactly as measured** — the model reasons on
+identical numbers — while workload identity stays inside the cluster.
+Relational structure is preserved on purpose: two workloads that really
+share a namespace still share one aliased namespace, because that
+relationship is precisely what §3.22's collateral logic is about.
+
+- `SanitizeJSON` walks the decoded tool result (never a regex over the
+  text, which could corrupt JSON or partially match a number), aliasing
+  identity-bearing fields and dropping `fix_manifest` outright.
+- `Restore` maps aliases back on the way out, so the operator still reads
+  their own real workload names in the answer.
+- `CHIDRIXX_AI_MODE` selects `sanitized` (default) or `raw` (explicit
+  opt-out). Anything unset or misspelled resolves to `sanitized` — a typo
+  must never silently downgrade to sending real names. Leaving
+  `GROQ_API_KEY` unset remains the real "off".
+- Every request logs `ai_mode` and the count of identifiers actually
+  aliased — real audit evidence that sanitization ran on that specific
+  call, rather than a claim in a README.
+
+**A real leak caught by testing against the actual payload, not an
+idealised one:** the first key map matched `cluster_id`, but `FindingRow`'s
+`ClusterID` field has **no JSON tag**, so Go marshals it as `ClusterID` and
+the real cluster name sailed straight through. Fixed by normalising keys
+(lowercase, underscores stripped) so both conventions this codebase really
+emits are matched by one entry.
+
+**Measured, not asserted:**
+- Live, against the **real Groq API**: a real chat turn returned a correct
+  grounded answer naming real workloads (via `Restore`), with the server
+  log confirming `ai_mode=sanitized aliased_identifiers=12`.
+- Payload reduction from dropping manifests: **47.7%** on a
+  manifest-bearing top-10 (7,251 → 3,791 bytes). Honest caveat: on *this*
+  lab cluster's current top-10 the reduction is only 3.6%, because none of
+  its highest-cost findings carry a manifest at all (their sources are
+  unresolved cgroup paths, so `fixengine.go` correctly generates nothing).
+  The saving is real but scales with how many findings genuinely have
+  manifests.
+
+**What this honestly does not cover:** a user who *types* a real workload
+name into the chat box sends that name. Free-text input is the operator's
+own explicit action, and is not rewritten. The gap this closes is the
+product silently shipping the whole topology on every tool call.
+
+10 new tests (`ai_sanitize_test.go`), full Go suite green at **219**.
 
 ### 3.22 Real deterministic traffic-replay safety check (`traffic_replay.go`)
 
@@ -1905,6 +1967,13 @@ across component comments:
 - **cgroup-namespace limitation is real and undocumented-around** — kind/k3d
   Docker-in-Docker environments hit a genuine `EPERM`; real managed
   Kubernetes (EKS/GKE/AKS) doesn't.
+- **The chat assistant sends aliased data to a third-party LLM, and free
+  text is not rewritten** — §3.23 aliases identifiers and drops generated
+  manifests before anything reaches Groq (default `sanitized`), but a
+  question an operator *types* containing a real workload name is sent as
+  typed. Groq's own published terms state it does not train on API data
+  and does not retain it by default, but that is their policy, not a
+  guarantee this codebase can enforce.
 - **There is no eBPF map eviction counter, and there cannot be one** —
   `BPF_MAP_TYPE_LRU_PERCPU_HASH` evicts silently with no kernel-side
   notification, so `kharcha_map_utilization_ratio` (§5.3) is an

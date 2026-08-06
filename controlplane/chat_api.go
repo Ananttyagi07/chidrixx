@@ -75,8 +75,16 @@ func handleChat(store *Store, groq *GroqClient) http.HandlerFunc {
 		}
 		messages = append(messages, ChatMessage{Role: "user", Content: req.Message})
 
+		sanitizer := NewSanitizer(resolveAIMode())
+
 		start := time.Now()
-		result, err := runChatLoop(r.Context(), groq, tools, defs, messages)
+		result, err := runChatLoop(r.Context(), groq, tools, defs, messages, sanitizer)
+
+		// Real audit evidence that sanitization ran on this specific
+		// request, rather than a claim in a README: how many distinct real
+		// identifiers were replaced before anything left for Groq.
+		log.Printf("chat: tenant=%d ai_mode=%s aliased_identifiers=%d",
+			tenantID, sanitizer.mode, sanitizer.AliasCount())
 
 		ev := AIEvalEvent{
 			Feature:          "chat",
@@ -126,7 +134,7 @@ type chatLoopResult struct {
 // and if it asks for a tool instead of answering, execute the tool
 // against real tenant-scoped data and feed the result back, up to
 // maxChatToolRounds times before giving up honestly.
-func runChatLoop(ctx context.Context, groq *GroqClient, tools []chatTool, defs []ToolDef, messages []ChatMessage) (chatLoopResult, error) {
+func runChatLoop(ctx context.Context, groq *GroqClient, tools []chatTool, defs []ToolDef, messages []ChatMessage, sanitizer *Sanitizer) (chatLoopResult, error) {
 	var res chatLoopResult
 	for i := 0; i < maxChatToolRounds; i++ {
 		res.Rounds++
@@ -138,7 +146,9 @@ func runChatLoop(ctx context.Context, groq *GroqClient, tools []chatTool, defs [
 		res.CompletionTokens += usage.CompletionTokens
 
 		if len(msg.ToolCalls) == 0 {
-			res.Reply = msg.Content
+			// The model only ever saw aliases, so map them back to the
+			// operator's real workload names before returning.
+			res.Reply = sanitizer.Restore(msg.Content)
 			return res, nil
 		}
 
@@ -156,7 +166,9 @@ func runChatLoop(ctx context.Context, groq *GroqClient, tools []chatTool, defs [
 					result = mustJSON(map[string]string{"error": err.Error()})
 					res.ToolCallErrors++
 				} else {
-					result = out
+					// The single chokepoint where real tenant data would
+					// otherwise leave for a third-party LLM provider.
+					result = sanitizer.SanitizeJSON(out)
 				}
 			}
 			messages = append(messages, ChatMessage{

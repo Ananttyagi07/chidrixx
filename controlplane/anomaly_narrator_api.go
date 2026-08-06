@@ -69,8 +69,13 @@ func handleNarrateAnomaly(store *Store, groq *GroqClient) http.HandlerFunc {
 			return
 		}
 
+		sanitizer := NewSanitizer(resolveAIMode())
+
 		start := time.Now()
-		narrative, usage, err := narrateAnomaly(r.Context(), groq, *match)
+		narrative, usage, err := narrateAnomaly(r.Context(), groq, *match, sanitizer)
+
+		log.Printf("narrate-anomaly: tenant=%d ai_mode=%s aliased_identifiers=%d",
+			tenantID, sanitizer.mode, sanitizer.AliasCount())
 
 		ev := AIEvalEvent{
 			Feature:          "anomaly_narrator",

@@ -38,7 +38,7 @@ func TestNarrateAnomalyMentionsRealNumbersAndLikelyCause(t *testing.T) {
 		},
 	}
 
-	narrative, _, err := narrateAnomaly(t.Context(), client, anomaly)
+	narrative, _, err := narrateAnomaly(t.Context(), client, anomaly, NewSanitizer(AIModeRaw))
 	if err != nil {
 		t.Fatalf("narrateAnomaly: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestNarrateAnomalyWithNoLikelyCauseStillPrompts(t *testing.T) {
 	client := newGroqClient("test-key", "", srv.URL)
 
 	anomaly := Anomaly{ClusterID: "cluster-a", PreviousCostINR: 10, CurrentCostINR: 50, GrowthRatio: 5}
-	if _, _, err := narrateAnomaly(t.Context(), client, anomaly); err != nil {
+	if _, _, err := narrateAnomaly(t.Context(), client, anomaly, NewSanitizer(AIModeRaw)); err != nil {
 		t.Fatalf("narrateAnomaly: %v", err)
 	}
 	if !bytes.Contains([]byte(capturedPrompt), []byte("none found")) {

@@ -174,7 +174,7 @@ func TestRunChatLoopRetriesOnceOnATransientGroqError(t *testing.T) {
 
 	result, err := runChatLoop(t.Context(), client, tools, toolDefs(tools), []ChatMessage{
 		{Role: "user", Content: "hi"},
-	})
+	}, NewSanitizer(AIModeRaw))
 	if err != nil {
 		t.Fatalf("runChatLoop: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestRunChatLoopCallsToolThenReturnsFinalAnswer(t *testing.T) {
 	result, err := runChatLoop(t.Context(), client, tools, toolDefs(tools), []ChatMessage{
 		{Role: "system", Content: chatSystemPrompt},
 		{Role: "user", Content: "what should I fix first?"},
-	})
+	}, NewSanitizer(AIModeRaw))
 	if err != nil {
 		t.Fatalf("runChatLoop: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestRunChatLoopStopsAfterMaxRoundsInsteadOfLoopingForever(t *testing.T) {
 
 	result, err := runChatLoop(t.Context(), client, tools, toolDefs(tools), []ChatMessage{
 		{Role: "user", Content: "loop forever"},
-	})
+	}, NewSanitizer(AIModeRaw))
 	if err != nil {
 		t.Fatalf("runChatLoop: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestRunChatLoopHandlesUnknownToolGracefully(t *testing.T) {
 
 	result, err := runChatLoop(t.Context(), client, tools, toolDefs(tools), []ChatMessage{
 		{Role: "user", Content: "delete everything"},
-	})
+	}, NewSanitizer(AIModeRaw))
 	if err != nil {
 		t.Fatalf("runChatLoop: %v", err)
 	}
